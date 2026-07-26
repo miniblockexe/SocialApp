@@ -7,8 +7,11 @@ using System;
 using Microsoft.AspNetCore.HttpOverrides;
 
 // BUILDER
-
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration
+    .AddJsonFile("/etc/secrets/appsettings.Production.json", optional: true, reloadOnChange: false);
+
 var config = builder.Configuration;
 var env = builder.Environment;
 
@@ -19,10 +22,8 @@ builder.Services
     {
         options.JsonSerializerOptions.PropertyNamingPolicy =
             System.Text.Json.JsonNamingPolicy.CamelCase;
-
         options.JsonSerializerOptions.ReferenceHandler =
             System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
-
         options.JsonSerializerOptions.DefaultIgnoreCondition =
             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
@@ -43,37 +44,30 @@ builder.Services.AddSwaggerWithJwt();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>("database");
 
-
 var app = builder.Build();
+
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders =
         ForwardedHeaders.XForwardedFor |
         ForwardedHeaders.XForwardedProto
 });
+
 // DATABASE MIGRATION
-
-if (!env.IsProduction())
+using var scope = app.Services.CreateScope();
+try
 {
-    using var scope = app.Services.CreateScope();
-
-    try
-    {
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        await db.Database.MigrateAsync();
-
-        app.Logger.LogInformation("Database migration hoàn thành.");
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogCritical(ex, "Migration thất bại — ứng dụng sẽ không khởi động.");
-        throw;
-    }
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.MigrateAsync();
+    app.Logger.LogInformation("Database migration hoàn thành.");
+}
+catch (Exception ex)
+{
+    app.Logger.LogCritical(ex, "Migration thất bại — ứng dụng sẽ không khởi động.");
+    throw;
 }
 
 // MIDDLEWARE PIPELINE
-
 // 1. Global Exception Handler
 app.UseGlobalExceptionHandler();
 
@@ -113,7 +107,6 @@ app.UseAuthorization();
 app.UseBannedUserCheck();
 
 // ENDPOINTS
-
 // Health Check
 app.MapHealthChecks("/health");
 
@@ -122,16 +115,13 @@ app.MapControllers();
 
 // SignalR
 var signalRConfig = config.GetSection("SignalRSettings");
-
 app.MapHub<ChatHub>(
     signalRConfig["ChatHubPath"] ?? "/hubs/chat");
-
 app.MapHub<NotificationHub>(
     signalRConfig["NotificationHubPath"] ?? "/hubs/notification");
 
 // Angular SPA Fallback
 app.MapFallbackToFile("index.html");
-
 
 app.Logger.LogInformation(
     "SocialApp đang chạy ở {Environment} mode. URL: {Urls}",
