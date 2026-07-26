@@ -4,6 +4,7 @@ using SocialApp.API.Hubs;
 using SocialApp.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using System;
+using Microsoft.AspNetCore.HttpOverrides;
 
 // BUILDER
 
@@ -44,7 +45,12 @@ builder.Services.AddHealthChecks()
 
 
 var app = builder.Build();
-
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedProto
+});
 // DATABASE MIGRATION
 
 if (!env.IsProduction())
