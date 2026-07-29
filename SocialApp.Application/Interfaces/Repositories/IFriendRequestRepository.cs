@@ -42,6 +42,25 @@ public interface IFriendRequestRepository
     /// </summary>
     Task<int> CountMutualFriendsAsync(Guid viewerId, Guid targetId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Bulk: đếm bạn chung giữa viewer và nhiều target cùng lúc
+    /// </summary>
+    Task<Dictionary<Guid, int>> CountMutualFriendsBulkAsync(
+        Guid viewerId, IEnumerable<Guid> targetIds, CancellationToken ct = default);
+
+    /// <summary>
+    /// Bulk: lấy FriendRequest giữa viewer và nhiều user cùng lúc
+    /// </summary>
+    Task<Dictionary<Guid, FriendRequest>> GetBetweenUsersBulkAsync(
+        Guid viewerId, IEnumerable<Guid> targetIds, CancellationToken ct = default);
+
+    /// <summary>
+    /// Bulk: lấy friendIds của nhiều user cùng lúc
+    /// Key = userId, Value = list friendIds của user đó.
+    /// </summary>
+    Task<Dictionary<Guid, List<Guid>>> GetFriendIdsBulkAsync(
+        IEnumerable<Guid> userIds, CancellationToken ct = default);
+
     /// <summary>Thêm record mới.</summary>
     Task AddAsync(FriendRequest entity, CancellationToken ct = default);
 

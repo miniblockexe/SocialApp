@@ -202,31 +202,53 @@ public sealed class MessageService : IMessageService
             .Take(safeSize)
             .ToListAsync();
 
+        var convIds = participantRecords.Select(p => p.ConversationId).ToList();
+
+        // Bulk-fetch last message per conversation — 1 query thay vì N
+        // EF Core không hỗ trợ GroupBy + First trực tiếp, dùng subquery trick
+        var lastMessageIds = await _db.Messages
+            .Where(m => convIds.Contains(m.ConversationId) && !m.IsDeleted)
+            .GroupBy(m => m.ConversationId)
+            .Select(g => g.OrderByDescending(m => m.CreatedAt).First().Id)
+            .ToListAsync();
+
+        var lastMessagesMap = await _db.Messages
+            .Include(m => m.Sender)
+            .Include(m => m.SeenBy)
+            .Where(m => lastMessageIds.Contains(m.Id))
+            .ToDictionaryAsync(m => m.ConversationId);
+
+        // Bulk-fetch unread counts per conversation — 1 query thay vì N
+        // Mỗi participant có LastReadAt khác nhau nên tính in-memory từ raw data
+        var lastReadAtMap = participantRecords.ToDictionary(p => p.ConversationId, p => p.LastReadAt);
+
+        var recentMessages = await _db.Messages
+            .Where(m =>
+                convIds.Contains(m.ConversationId) &&
+                !m.IsDeleted &&
+                m.SenderId != userId)
+            .Select(m => new { m.ConversationId, m.CreatedAt })
+            .ToListAsync();
+
+        var unreadCountMap = convIds.ToDictionary(id => id, id =>
+        {
+            var lastReadAt = lastReadAtMap.GetValueOrDefault(id);
+            return recentMessages.Count(m =>
+                m.ConversationId == id &&
+                (lastReadAt == null || m.CreatedAt > lastReadAt));
+        });
+
         var items = new List<ConversationDto>(participantRecords.Count);
 
         foreach (var p in participantRecords)
         {
             var conv = p.Conversation;
 
-            // Lấy LastMessage (chưa xóa)
-            var lastMessage = await _db.Messages
-                .Include(m => m.Sender)
-                .Include(m => m.SeenBy)
-                .Where(m => m.ConversationId == conv.Id && !m.IsDeleted)
-                .OrderByDescending(m => m.CreatedAt)
-                .FirstOrDefaultAsync();
-
-            // Tính UnreadCount: message sau LastReadAt, không phải của chính mình
-            var lastReadAt = p.LastReadAt;
-            var unreadCount = await _db.Messages.CountAsync(m =>
-                m.ConversationId == conv.Id &&
-                !m.IsDeleted &&
-                m.SenderId != userId &&
-                (lastReadAt == null || m.CreatedAt > lastReadAt));
-
             var participantDtos = conv.Participants
                 .Select(cp => _mapper.Map<UserBriefDto>(cp.User))
                 .ToList();
+
+            lastMessagesMap.TryGetValue(conv.Id, out var lastMessage);
 
             items.Add(new ConversationDto
             {
@@ -236,7 +258,7 @@ public sealed class MessageService : IMessageService
                 GroupAvatarUrl = conv.GroupAvatarUrl,
                 LastMessageAt = conv.LastMessageAt,
                 LastMessage = lastMessage is null ? null : MapToMessageDto(lastMessage),
-                UnreadCount = unreadCount,
+                UnreadCount = unreadCountMap.GetValueOrDefault(conv.Id, 0),
                 Participants = participantDtos
             });
         }
@@ -360,7 +382,7 @@ public sealed class MessageService : IMessageService
         // GIF từ Tenor: dùng GifUrl trực tiếp, không upload file
         if (!string.IsNullOrWhiteSpace(dto.GifUrl) && dto.Attachment is null)
         {
-            attachmentUrl  = dto.GifUrl.Trim();
+            attachmentUrl = dto.GifUrl.Trim();
             attachmentType = "gif";
         }
 

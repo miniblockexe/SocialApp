@@ -407,18 +407,21 @@ public sealed class FriendService : IFriendService
             .Take(safeSize)
             .ToListAsync();
 
-        var items = new List<FriendListItemDto>(records.Count);
+        // Bulk-fetch mutual counts — 2 queries thay vì 2N
+        var friendIds = records
+            .Select(fr => fr.SenderId == userId ? fr.ReceiverId : fr.SenderId)
+            .ToList();
+        var mutualMap = await _friendRepo.CountMutualFriendsBulkAsync(userId, friendIds);
 
+        var items = new List<FriendListItemDto>(records.Count);
         foreach (var fr in records)
         {
             var friend = fr.SenderId == userId ? fr.Receiver : fr.Sender;
-            var mutualCount = await _friendRepo.CountMutualFriendsAsync(userId, friend.Id);
-
             items.Add(new FriendListItemDto
             {
                 User = _mapper.Map<UserBriefDto>(friend),
                 FriendSince = fr.UpdatedAt,
-                MutualFriendsCount = mutualCount
+                MutualFriendsCount = mutualMap.GetValueOrDefault(friend.Id, 0)
             });
         }
 
@@ -502,13 +505,15 @@ public sealed class FriendService : IFriendService
         foreach (var id in blockedIds) excludeIds.Add(id);
         foreach (var id in pendingIds) excludeIds.Add(id);
 
-        // Friends-of-friends: lấy friends của từng friend, đếm số lần xuất hiện
+        // Friends-of-friends: bulk-fetch trong 1 query thay vì N queries
         var foFCounts = new Dictionary<Guid, int>();
         var foFMutuals = new Dictionary<Guid, List<Guid>>(); // targetId → list friendIds chung
 
+        var friendsOfFriendsMap = await _friendRepo.GetFriendIdsBulkAsync(friendIds);
+
         foreach (var friendId in friendIds)
         {
-            var friendsOfFriend = await _friendRepo.GetFriendIdsAsync(friendId);
+            var friendsOfFriend = friendsOfFriendsMap.GetValueOrDefault(friendId, []);
 
             foreach (var candidateId in friendsOfFriend)
             {
@@ -574,7 +579,19 @@ public sealed class FriendService : IFriendService
 
         var userDict = candidateUsers.ToDictionary(u => u.Id);
 
-        // Load mutual friend previews (tối đa 3 người)
+        // Bulk-load tất cả preview users trong 1 query thay vì N×3
+        var allPreviewIds = pagedCandidates
+            .SelectMany(id => (foFMutuals.TryGetValue(id, out var ml) ? ml : [])
+                .Distinct().Take(3))
+            .Distinct()
+            .ToList();
+
+        var previewUserDict = allPreviewIds.Count > 0
+            ? await _userRepo.Query()
+                .Where(u => allPreviewIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id)
+            : new Dictionary<Guid, SocialApp.Domain.Entities.User>();
+
         var items = new List<FriendSuggestionDto>(pagedCandidates.Count);
 
         foreach (var candidateId in pagedCandidates)
@@ -588,14 +605,10 @@ public sealed class FriendService : IFriendService
                 .Take(3)
                 .ToList();
 
-            var mutualFriendPreviews = new List<UserBriefDto>(mutualFriendIdPreview.Count);
-
-            foreach (var mfId in mutualFriendIdPreview)
-            {
-                var mfUser = await _userRepo.GetByIdAsync(mfId);
-                if (mfUser is not null)
-                    mutualFriendPreviews.Add(_mapper.Map<UserBriefDto>(mfUser));
-            }
+            var mutualFriendPreviews = mutualFriendIdPreview
+                .Where(id => previewUserDict.ContainsKey(id))
+                .Select(id => _mapper.Map<UserBriefDto>(previewUserDict[id]))
+                .ToList();
 
             items.Add(new FriendSuggestionDto
             {

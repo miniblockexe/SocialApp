@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SocialApp.Application.Common;
@@ -154,30 +155,52 @@ public sealed class UserService : IUserService
         size = size < 1 ? 10 : size > 100 ? 100 : size;
         var keywordLower = keyword.ToLower();
         var blockedIds = await _friendRepo.GetBlockedUserIdsAsync(viewerId);
-        var allMatching = await _userRepo.GetAsync(u =>
-            u.Id != viewerId && !blockedIds.Contains(u.Id) &&
-            (u.Username.ToLower().Contains(keywordLower) ||
-             u.FullName.ToLower().Contains(keywordLower)));
-        var totalCount = allMatching.Count;
-        var withMutual = new List<(User User, int MutualCount)>();
-        foreach (var u in allMatching)
+
+        // Paginate ở DB thay vì load toàn bộ vào memory
+        // NOTE: mutual count không sort được ở DB level nên sort by FullName,
+        // rồi re-sort in-memory sau khi có mutual counts (page-scope only).
+        var baseQuery = _userRepo.Query()
+            .Where(u =>
+                u.Id != viewerId &&
+                u.DeletedAt == null &&
+                !blockedIds.Contains(u.Id) &&
+                (u.Username.ToLower().Contains(keywordLower) ||
+                 u.FullName.ToLower().Contains(keywordLower)));
+
+        var totalCount = await baseQuery.CountAsync();
+
+        // Chiến lược: lấy page hiện tại theo FullName, bulk-fetch mutual rồi sort lại
+        var pagedUsers = await baseQuery
+            .OrderBy(u => u.FullName)
+            .Skip((page - 1) * size)
+            .Take(size)
+            .ToListAsync();
+
+        if (pagedUsers.Count == 0)
+            return PagedResult<UserSearchResultDto>.Create([], totalCount, page, size);
+
+        var userIds = pagedUsers.Select(u => u.Id).ToList();
+
+        // Bulk-fetch mutual counts + friendship status — 2 queries thay vì 2×pageSize
+        var mutualCounts = await _friendRepo.CountMutualFriendsBulkAsync(viewerId, userIds);
+        var friendRequests = await _friendRepo.GetBetweenUsersBulkAsync(viewerId, userIds);
+
+        // Re-sort in-memory trong phạm vi page
+        var sorted = pagedUsers
+            .OrderByDescending(u => mutualCounts.GetValueOrDefault(u.Id, 0))
+            .ThenBy(u => u.FullName)
+            .ToList();
+
+        var items = sorted.Select(user =>
         {
-            var mutual = await _friendRepo.CountMutualFriendsAsync(viewerId, u.Id);
-            withMutual.Add((u, mutual));
-        }
-        var sorted = withMutual
-            .OrderByDescending(x => x.MutualCount).ThenBy(x => x.User.FullName)
-            .Skip((page - 1) * size).Take(size).ToList();
-        var items = new List<UserSearchResultDto>();
-        foreach (var (user, mutualCount) in sorted)
-        {
-            var req = await _friendRepo.GetBetweenUsersAsync(viewerId, user.Id);
+            var req = friendRequests.GetValueOrDefault(user.Id);
             var status = ComputeFriendshipStatusFromRequest(viewerId, req);
             var d = _mapper.Map<UserSearchResultDto>(user);
-            d.MutualFriendsCount = mutualCount;
+            d.MutualFriendsCount = mutualCounts.GetValueOrDefault(user.Id, 0);
             d.FriendshipStatus = status;
-            items.Add(d);
-        }
+            return d;
+        }).ToList();
+
         return PagedResult<UserSearchResultDto>.Create(items, totalCount, page, size);
     }
 
