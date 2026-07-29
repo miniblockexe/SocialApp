@@ -446,20 +446,18 @@ public sealed class MessageService : IMessageService
         message.Sender = sender!;
         message.SeenBy = [new MessageSeen { MessageId = message.Id, UserId = senderId }];
 
-        // Tạo notification cho tất cả participant khác
+        // Tạo notification cho tất cả participant khác — parallel thay vì sequential
         var otherParticipants = await _db.ConversationParticipants
             .Where(p => p.ConversationId == dto.ConversationId && p.UserId != senderId)
             .ToListAsync();
 
-        foreach (var p in otherParticipants)
-        {
-            await _notificationService.CreateNotificationAsync(
+        await Task.WhenAll(otherParticipants.Select(p =>
+            _notificationService.CreateNotificationAsync(
                 recipientId: p.UserId,
                 actorId: senderId,
                 type: NotificationType.Message,
                 entityId: message.Id,
-                content: $"{sender?.FullName ?? "Ai đó"} đã gửi tin nhắn cho bạn.");
-        }
+                content: $"{sender?.FullName ?? "Ai đó"} đã gửi tin nhắn cho bạn.")));
 
         _logger.LogInformation(
             "Message sent: MessageId={MessageId}, ConvId={ConvId}, Sender={SenderId}",
@@ -518,20 +516,18 @@ public sealed class MessageService : IMessageService
         message.Sender = sender!;
         message.SeenBy = [new MessageSeen { MessageId = message.Id, UserId = senderId }];
 
-        // Notification cho các participant khác
+        // Notification cho các participant khác — parallel thay vì sequential
         var otherParticipants = await _db.ConversationParticipants
             .Where(p => p.ConversationId == dto.ConversationId && p.UserId != senderId)
             .ToListAsync();
 
-        foreach (var p in otherParticipants)
-        {
-            await _notificationService.CreateNotificationAsync(
+        await Task.WhenAll(otherParticipants.Select(p =>
+            _notificationService.CreateNotificationAsync(
                 recipientId: p.UserId,
                 actorId: senderId,
                 type: NotificationType.Message,
                 entityId: message.Id,
-                content: $"{sender?.FullName ?? "Ai đó"} đã gửi tin nhắn cho bạn.");
-        }
+                content: $"{sender?.FullName ?? "Ai đó"} đã gửi tin nhắn cho bạn.")));
 
         _logger.LogInformation(
             "Hub message sent: MessageId={MessageId}, ConvId={ConvId}, Sender={SenderId}",
@@ -661,18 +657,11 @@ public sealed class MessageService : IMessageService
         var commonIds = userAConvIds.Intersect(userBConvIds).ToList();
         if (commonIds.Count == 0) return null;
 
-        foreach (var convId in commonIds)
-        {
-            var conv = await _db.Conversations
-                .Include(c => c.Participants)
-                .ThenInclude(p => p.User)
-                .FirstOrDefaultAsync(c => c.Id == convId && !c.IsGroup);
-
-            if (conv is not null && conv.Participants.Count == 2)
-                return conv;
-        }
-
-        return null;
+        return await _db.Conversations
+            .Include(c => c.Participants)
+            .ThenInclude(p => p.User)
+            .Where(c => commonIds.Contains(c.Id) && !c.IsGroup && c.Participants.Count == 2)
+            .FirstOrDefaultAsync();
     }
 
     /// <summary>Build ConversationDto đầy đủ từ Conversation entity.</summary>
