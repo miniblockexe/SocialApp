@@ -446,19 +446,6 @@ public sealed class MessageService : IMessageService
         message.Sender = sender!;
         message.SeenBy = [new MessageSeen { MessageId = message.Id, UserId = senderId }];
 
-        // Tạo notification cho tất cả participant khác — parallel thay vì sequential
-        var otherParticipants = await _db.ConversationParticipants
-            .Where(p => p.ConversationId == dto.ConversationId && p.UserId != senderId)
-            .ToListAsync();
-
-        await Task.WhenAll(otherParticipants.Select(p =>
-            _notificationService.CreateNotificationAsync(
-                recipientId: p.UserId,
-                actorId: senderId,
-                type: NotificationType.Message,
-                entityId: message.Id,
-                content: $"{sender?.FullName ?? "Ai đó"} đã gửi tin nhắn cho bạn.")));
-
         _logger.LogInformation(
             "Message sent: MessageId={MessageId}, ConvId={ConvId}, Sender={SenderId}",
             message.Id, dto.ConversationId, senderId);
@@ -515,19 +502,6 @@ public sealed class MessageService : IMessageService
         var sender = await _userRepo.GetByIdAsync(senderId);
         message.Sender = sender!;
         message.SeenBy = [new MessageSeen { MessageId = message.Id, UserId = senderId }];
-
-        // Notification cho các participant khác — parallel thay vì sequential
-        var otherParticipants = await _db.ConversationParticipants
-            .Where(p => p.ConversationId == dto.ConversationId && p.UserId != senderId)
-            .ToListAsync();
-
-        await Task.WhenAll(otherParticipants.Select(p =>
-            _notificationService.CreateNotificationAsync(
-                recipientId: p.UserId,
-                actorId: senderId,
-                type: NotificationType.Message,
-                entityId: message.Id,
-                content: $"{sender?.FullName ?? "Ai đó"} đã gửi tin nhắn cho bạn.")));
 
         _logger.LogInformation(
             "Hub message sent: MessageId={MessageId}, ConvId={ConvId}, Sender={SenderId}",
