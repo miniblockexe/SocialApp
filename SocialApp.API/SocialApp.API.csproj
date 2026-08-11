@@ -1,5 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
-
+	<ItemGroup>
+		<Content Remove="wwwroot\**" />
+	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\SocialApp.Application\SocialApp.Application.csproj" />
 		<ProjectReference Include="..\SocialApp.Infrastructure\SocialApp.Infrastructure.csproj" />

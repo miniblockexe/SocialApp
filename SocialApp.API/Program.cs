@@ -3,7 +3,6 @@ using SocialApp.API.Middleware;
 using SocialApp.API.Hubs;
 using SocialApp.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
-using System;
 using Microsoft.AspNetCore.HttpOverrides;
 
 // BUILDER
@@ -77,11 +76,7 @@ if (!env.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
-// 3. Serve Angular trong wwwroot
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
-// 4. Swagger
+// 3. Swagger
 app.UseSwagger();
 app.UseSwaggerUI(options =>
 {
@@ -90,20 +85,20 @@ app.UseSwaggerUI(options =>
     options.DisplayRequestDuration();
 });
 
-// 5. CORS
+// 4. CORS
 app.UseCors("AllowFrontend");
 
-// 6. Rate Limiter
+// 5. Rate Limiter
 app.UseRateLimiter();
 
-// 7. Routing
+// 6. Routing
 app.UseRouting();
 
-// 8. Authentication & Authorization
+// 7. Authentication & Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
-// 9. Ban Check
+// 8. Ban Check
 app.UseBannedUserCheck();
 
 // ENDPOINTS
@@ -119,9 +114,6 @@ app.MapHub<ChatHub>(
     signalRConfig["ChatHubPath"] ?? "/hubs/chat");
 app.MapHub<NotificationHub>(
     signalRConfig["NotificationHubPath"] ?? "/hubs/notification");
-
-// Angular SPA Fallback
-app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation(
     "SocialApp đang chạy ở {Environment} mode. URL: {Urls}",
