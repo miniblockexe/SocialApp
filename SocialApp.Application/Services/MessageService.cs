@@ -33,6 +33,7 @@ public sealed class MessageService : IMessageService
     private readonly IMapper _mapper;
     private readonly IOptions<FileValidationSettings> _fileSettings;
     private readonly ILogger<MessageService> _logger;
+    private readonly IChatHub _chatHub;
 
     // Giới hạn kích thước file (ảnh 10MB, video/audio 50MB)
     private const long MaxImageBytes = 10 * 1024 * 1024;
@@ -48,7 +49,8 @@ public sealed class MessageService : IMessageService
         IR2Service r2Service,
         IMapper mapper,
         IOptions<FileValidationSettings> fileSettings,
-        ILogger<MessageService> logger)
+        ILogger<MessageService> logger,
+        IChatHub chatHub)
     {
         _db = db;
         _userRepo = userRepo;
@@ -57,6 +59,7 @@ public sealed class MessageService : IMessageService
         _mapper = mapper;
         _fileSettings = fileSettings;
         _logger = logger;
+        _chatHub = chatHub;
     }
 
     public async Task<ConversationDto> CreateOrGetConversationAsync(
@@ -450,7 +453,22 @@ public sealed class MessageService : IMessageService
             "Message sent: MessageId={MessageId}, ConvId={ConvId}, Sender={SenderId}",
             message.Id, dto.ConversationId, senderId);
 
-        return MapToMessageDto(message);
+        var messageDto = MapToMessageDto(message);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _chatHub.SendMessageAsync(messageDto.ConversationId, messageDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Broadcast SignalR sau HTTP SendMessage thất bại. MessageId={MessageId}, ConvId={ConvId}",
+                    messageDto.Id, messageDto.ConversationId);
+            }
+        });
+
+        return messageDto;
     }
 
     public async Task<MessageDto> SendMessageFromHubAsync(Guid senderId, SendMessageHubDto dto)
