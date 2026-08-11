@@ -125,6 +125,8 @@ public sealed class MessagesController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int size = 20)
     {
+        Response.Headers.CacheControl = "no-store";
+
         var userId = User.GetUserIdOrThrow();
 
         try
@@ -159,6 +161,8 @@ public sealed class MessagesController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int size = 20)
     {
+        Response.Headers.CacheControl = "no-store";
+
         if (id == Guid.Empty)
             return BadRequest(ApiResponse<PagedResult<MessageDto>>.BadRequest("ConversationId không hợp lệ."));
 
@@ -167,8 +171,6 @@ public sealed class MessagesController : ControllerBase
         try
         {
             var result = await _messageService.GetMessagesAsync(userId, id, page, size);
-
-            // Auto mark seen trong background — tạo scope mới để tránh ObjectDisposedException
             _ = Task.Run(async () =>
             {
                 try
