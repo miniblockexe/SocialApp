@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using SocialApp.Application.Interfaces.Repositories;
 using SocialApp.Domain.Entities;
+using SocialApp.Domain.Enums;
 using SocialApp.Infrastructure.Data;
 
 namespace SocialApp.Infrastructure.Repositories;
@@ -68,7 +69,11 @@ public sealed class NotificationRepository : INotificationRepository
     public async Task<int> CountUnreadAsync(Guid userId, CancellationToken ct = default)
     {
         return await _context.Notifications
-            .CountAsync(n => n.UserId == userId && !n.IsRead, ct);
+            .CountAsync(
+                n => n.UserId == userId
+                  && !n.IsRead
+                  && n.Type != NotificationType.Message,
+                ct);
     }
 
     public async Task<int> CountTotalAsync(Guid userId, CancellationToken ct = default)
