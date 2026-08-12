@@ -190,6 +190,14 @@ internal sealed class PostConfiguration : IEntityTypeConfiguration<Post>
         builder.HasMany(p => p.PostMediaFiles).WithOne(pmf => pmf.Post).HasForeignKey(pmf => pmf.PostId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(p => p.Comments).WithOne(c => c.Post).HasForeignKey(c => c.PostId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(p => p.Likes).WithOne(l => l.Post).HasForeignKey(l => l.PostId).OnDelete(DeleteBehavior.Cascade);
+
+        builder.Property(p => p.OriginalPostId).IsRequired(false);
+        builder.HasOne(p => p.OriginalPost)
+               .WithMany(p => p.Shares)
+               .HasForeignKey(p => p.OriginalPostId)
+               .IsRequired(false)
+               .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(p => p.OriginalPostId).HasDatabaseName("IX_Posts_OriginalPostId");
     }
 }
 

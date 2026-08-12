@@ -20,6 +20,11 @@ public class Post : BaseAuditableEntity
     /// <summary>Quyền hiển thị: Public = 0, Friends = 1, OnlyMe = 2.</summary>
     public PostPrivacy Privacy { get; set; } = PostPrivacy.Public;
 
+    /// <summary>
+    /// hiển thị placeholder "Bài viết gốc đã bị xóa").
+    /// </summary>
+    public Guid? OriginalPostId { get; set; }
+
     // Navigation properties
 
     /// <summary>Tác giả bài đăng.</summary>
@@ -33,4 +38,10 @@ public class Post : BaseAuditableEntity
 
     /// <summary>Danh sách bình luận.</summary>
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
+
+    /// <summary>Bài gốc (self-ref, nullable). Null nếu đây là bài gốc.</summary>
+    public Post? OriginalPost { get; set; }
+
+    /// <summary>Các bài đã chia sẻ lại bài này (inverse của OriginalPost).</summary>
+    public ICollection<Post> Shares { get; set; } = new List<Post>();
 }

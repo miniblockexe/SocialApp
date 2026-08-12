@@ -6,6 +6,7 @@ using Npgsql;
 using SocialApp.Application.Common;
 using SocialApp.Application.Common.Exceptions;
 using SocialApp.Application.DTOs.Posts;
+using SocialApp.Application.DTOs.Auth;
 using SocialApp.Application.Interfaces.Repositories;
 using SocialApp.Application.Interfaces.Services;
 using SocialApp.Application.Settings;
@@ -519,9 +520,25 @@ public sealed class PostService : IPostService
 
         var postIds = posts.Select(p => p.Id).ToList();
 
-        // Bulk fetch — tối đa 2 query bất kể page có bao nhiêu post, thay vì N+1.
         var likes = await _likeRepo.GetByPostIdsAsync(postIds);
         var comments = await _commentRepo.GetAsync(c => postIds.Contains(c.PostId) && c.DeletedAt == null);
+
+        var shareCounts = await _postRepo.GetShareCountsAsync(postIds);
+
+        var sharedByMe = await _postRepo.GetSharedPostIdsByUserAsync(viewerId, postIds);
+
+        var originalPostIds = posts
+            .Where(p => p.OriginalPostId.HasValue)
+            .Select(p => p.OriginalPostId!.Value)
+            .Distinct()
+            .ToList();
+
+        Dictionary<Guid, Post> originalPosts = [];
+        if (originalPostIds.Count > 0)
+        {
+            var originals = await _postRepo.GetOriginalPostsAsync(originalPostIds);
+            originalPosts = originals.ToDictionary(p => p.Id);
+        }
 
         var likesByPost = likes.ToLookup(l => l.PostId);
         var commentsByPost = comments.ToLookup(c => c.PostId);
@@ -535,10 +552,78 @@ public sealed class PostService : IPostService
             dto.CommentCount = commentsByPost[post.Id].Count();
             dto.IsLikedByMe = likesByPost[post.Id].Any(l => l.UserId == viewerId);
             dto.IsOwner = post.UserId == viewerId;
+            dto.ShareCount = shareCounts.GetValueOrDefault(post.Id, 0);
+            dto.IsSharedByMe = sharedByMe.Contains(post.Id);
+
+            if (post.OriginalPostId.HasValue &&
+                originalPosts.TryGetValue(post.OriginalPostId.Value, out var orig))
+            {
+                dto.OriginalPost = new OriginalPostDto
+                {
+                    Id = orig.Id,
+                    Content = orig.Content,
+                    CreatedAt = orig.CreatedAt,
+                    Author = _mapper.Map<UserBriefDto>(orig.User),
+                    MediaFiles = _mapper.Map<List<PostMediaDto>>(orig.PostMediaFiles),
+                    IsDeleted = orig.IsDeleted
+                };
+            }
+            else if (post.OriginalPostId.HasValue)
+            {
+                dto.OriginalPost = new OriginalPostDto { IsDeleted = true };
+            }
+
             result.Add(dto);
         }
 
         return result;
+    }
+
+    public async Task<PostResponseDto> SharePostAsync(
+        Guid userId, Guid originalPostId, SharePostRequestDto dto)
+    {
+        var originalPost = await _postRepo.FirstOrDefaultAsync(
+            p => p.Id == originalPostId && p.DeletedAt == null,
+            default,
+            p => p.User, p => p.PostMediaFiles);
+
+        if (originalPost is null)
+            throw new KeyNotFoundException($"Bài đăng {originalPostId} không tồn tại.");
+
+        await EnsureViewableAsync(originalPost, userId);
+
+        if (originalPost.OriginalPostId.HasValue)
+            throw new InvalidOperationException(
+                "Không thể chia sẻ lại bài viết đã là bài chia sẻ. " +
+                "Hãy chia sẻ từ bài viết gốc.");
+
+        var content = dto.Content?.Trim();
+        var sharePost = new Post
+        {
+            UserId = userId,
+            Content = string.IsNullOrWhiteSpace(content) ? null : content,
+            Privacy = dto.Privacy,
+            OriginalPostId = originalPostId
+        };
+
+        await _postRepo.AddAsync(sharePost);
+        await _postRepo.SaveChangesAsync();
+
+        if (userId != originalPost.UserId)
+        {
+            await CreateNotificationAsync(
+                recipientId: originalPost.UserId,
+                actorId: userId,
+                type: NotificationType.Share,
+                entityId: originalPostId,
+                content: "đã chia sẻ bài viết của bạn.");
+        }
+
+        var savedShare = await _postRepo.FirstOrDefaultAsync(
+            p => p.Id == sharePost.Id, default, p => p.User, p => p.PostMediaFiles);
+
+        var responseList = await BuildPostResponsesAsync([savedShare!], userId);
+        return responseList[0];
     }
 
     private sealed record PostMediaUploadResult(

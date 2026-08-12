@@ -120,4 +120,18 @@ public interface IPostService
     /// <exception cref="ForbiddenException">403 — không phải chủ comment và không phải admin.</exception>
     /// <exception cref="InvalidOperationException">400 — comment đã được xóa trước đó.</exception>
     Task DeleteCommentAsync(Guid userId, Guid commentId, bool isAdmin = false);
+
+    /// <summary>
+    /// Chia sẻ lại bài viết lên trang cá nhân (repost).
+    /// Tạo một Post mới với OriginalPostId trỏ vào bài gốc.
+    /// Không cho share bài đã là share (chặn chain).
+    /// Tự động gửi notification cho tác giả bài gốc (trừ tự share bài mình).
+    /// </summary>
+    /// <param name="userId">Id người thực hiện share.</param>
+    /// <param name="originalPostId">Id bài gốc cần share.</param>
+    /// <param name="dto">Caption và privacy của bài share mới.</param>
+    /// <exception cref="KeyNotFoundException">404 — bài gốc không tồn tại hoặc đã xóa.</exception>
+    /// <exception cref="ForbiddenException">403 — không đủ quyền xem bài gốc.</exception>
+    /// <exception cref="InvalidOperationException">400 — share bài đã là share (chain không cho phép).</exception>
+    Task<PostResponseDto> SharePostAsync(Guid userId, Guid originalPostId, SharePostRequestDto dto);
 }

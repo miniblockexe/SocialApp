@@ -248,7 +248,7 @@ public sealed class NotificationService : INotificationService
 
     private static string ResolveEntityType(NotificationType type) => type switch
     {
-        NotificationType.Like or NotificationType.Comment => "post",
+        NotificationType.Like or NotificationType.Comment or NotificationType.Share => "post",
         NotificationType.FriendRequest or NotificationType.FriendAccepted => "friend_request",
         NotificationType.Message => "message",
         _ => "system"

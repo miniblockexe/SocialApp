@@ -8,5 +8,6 @@ public enum NotificationType
     FriendRequest = 2,
     FriendAccepted = 3,
     Message = 4,
-    System = 5
+    System = 5,
+    Share = 6,
 }

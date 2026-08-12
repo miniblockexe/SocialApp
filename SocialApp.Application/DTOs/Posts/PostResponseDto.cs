@@ -5,8 +5,8 @@ namespace SocialApp.Application.DTOs.Posts;
 
 /// <summary>
 /// DTO đầy đủ thông tin 1 bài đăng — trả về khi xem chi tiết, feed, hoặc danh sách bài của user.
-/// LikeCount, CommentCount, IsLikedByMe, IsOwner được tính thủ công trong service,
-/// không map qua AutoMapper (giống pattern UserProfileDto).
+/// LikeCount, CommentCount, IsLikedByMe, IsOwner, ShareCount, IsSharedByMe được tính thủ công
+/// trong service, không map qua AutoMapper (giống pattern UserProfileDto).
 /// </summary>
 public sealed class PostResponseDto
 {
@@ -37,4 +37,16 @@ public sealed class PostResponseDto
 
     /// <summary>Viewer hiện tại có phải tác giả bài này không.</summary>
     public bool IsOwner { get; set; }
+
+    /// <summary>Số lần bài này được chia sẻ lại (repost).</summary>
+    public int ShareCount { get; set; }
+
+    /// <summary>Viewer hiện tại đã chia sẻ lại bài này chưa.</summary>
+    public bool IsSharedByMe { get; set; }
+
+    /// <summary>
+    /// Bài gốc được nhúng bên trong 
+    /// Null = bài đăng thông thường.
+    /// </summary>
+    public OriginalPostDto? OriginalPost { get; set; }
 }
