@@ -7,7 +7,6 @@ using SocialApp.Application.Common;
 using SocialApp.Application.Common.Exceptions;
 using SocialApp.Application.DTOs.Posts;
 using SocialApp.Application.Interfaces.Services;
-using SocialApp.Application.DTOs.Posts;
 using SocialApp.Application.Services;
 
 namespace SocialApp.API.Controllers;
@@ -366,6 +365,48 @@ public sealed class PostsController : ControllerBase
 
 
     /// <summary>
+    /// Chia sẻ lại bài viết lên trang cá nhân (repost).
+    /// POST /api/posts/{id}/share-to-feed
+    /// Body: { content?: string, privacy: 0|1|2 }
+    /// </summary>
+    [HttpPost("{id:guid}/share-to-feed")]
+    [EnableRateLimiting("default")]
+    [ProducesResponseType(typeof(ApiResponse<PostResponseDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ShareToFeed(Guid id, [FromBody] SharePostRequestDto dto)
+    {
+        var userId = User.GetUserIdOrThrow();
+        try
+        {
+            var result = await _postService.SharePostAsync(userId, id, dto);
+            return CreatedAtAction(nameof(GetPost), new { id = result.Id },
+                ApiResponse<PostResponseDto>.Ok(result));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse<object>.NotFound(ex.Message));
+        }
+        catch (ForbiddenException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<object>.Forbidden(ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ApiResponse<object>.BadRequest(ex.Message));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ShareToFeed thất bại. PostId={PostId}, UserId={UserId}", id, userId);
+            return StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<object>.InternalServerError());
+        }
+    }
+
+
+
+    /// <summary>
     /// Lấy URL rút gọn (TinyURL) để chia sẻ bài đăng ra ngoài SocialApp.
     /// Trả về URL gốc nếu TinyURL API không phản hồi.
     /// </summary>
@@ -389,8 +430,8 @@ public sealed class PostsController : ControllerBase
                 ? "https://socialapp.example.com"
                 : baseUrl.TrimEnd('/');
 
-            var longUrl     = $"{frontendBase}/posts/{id}";
-            var shortUrl    = await _urlShortener.ShortenAsync(longUrl);
+            var longUrl = $"{frontendBase}/posts/{id}";
+            var shortUrl = await _urlShortener.ShortenAsync(longUrl);
 
             return Ok(ApiResponse<ShareUrlDto>.Ok(new ShareUrlDto(id, longUrl, shortUrl)));
         }
