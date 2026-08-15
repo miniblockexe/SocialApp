@@ -24,7 +24,6 @@ public sealed class PostsController : ControllerBase
     private readonly IPostService _postService;
     private readonly IValidator<CreatePostDto> _createPostValidator;
     private readonly IValidator<CreateCommentDto> _createCommentValidator;
-    private readonly IUrlShortenerService _urlShortener;
     private readonly ILogger<PostsController> _logger;
 
     // Trần chặn nhanh cho tổng request multipart (10 file media) — heuristic, không phải
@@ -36,13 +35,11 @@ public sealed class PostsController : ControllerBase
         IPostService postService,
         IValidator<CreatePostDto> createPostValidator,
         IValidator<CreateCommentDto> createCommentValidator,
-        IUrlShortenerService urlShortener,
         ILogger<PostsController> logger)
     {
         _postService = postService;
         _createPostValidator = createPostValidator;
         _createCommentValidator = createCommentValidator;
-        _urlShortener = urlShortener;
         _logger = logger;
     }
 
@@ -405,35 +402,24 @@ public sealed class PostsController : ControllerBase
     }
 
 
-
-    /// <summary>
-    /// Lấy URL rút gọn (TinyURL) để chia sẻ bài đăng ra ngoài SocialApp.
-    /// Trả về URL gốc nếu TinyURL API không phản hồi.
-    /// </summary>
-    /// <param name="id">Id bài đăng.</param>
-    /// <param name="baseUrl">Base URL của frontend — dùng để tạo deep link (vd: https://myapp.com).</param>
-    /// <response code="200">Trả về short URL.</response>
+    /// <summary>Trả về share link của bài viết (backend /share/{id} — tự phục vụ OG preview).</summary>
+    /// <response code="200">Trả về share URL.</response>
     /// <response code="404">Bài đăng không tồn tại.</response>
     [HttpGet("{id:guid}/share")]
     [EnableRateLimiting("default")]
     [ProducesResponseType(typeof(ApiResponse<ShareUrlDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetShareUrl(Guid id, [FromQuery] string? baseUrl = null)
+    public async Task<IActionResult> GetShareUrl(Guid id)
     {
         var userId = User.GetUserIdOrThrow();
 
         try
         {
-            var post = await _postService.GetPostByIdAsync(id, userId);
+            await _postService.GetPostByIdAsync(id, userId);
 
-            var frontendBase = string.IsNullOrWhiteSpace(baseUrl)
-                ? "https://socialapp.example.com"
-                : baseUrl.TrimEnd('/');
+            var shareUrl = $"{Request.Scheme}://{Request.Host}/share/{id}";
 
-            var longUrl = $"{frontendBase}/posts/{id}";
-            var shortUrl = await _urlShortener.ShortenAsync(longUrl);
-
-            return Ok(ApiResponse<ShareUrlDto>.Ok(new ShareUrlDto(id, longUrl, shortUrl)));
+            return Ok(ApiResponse<ShareUrlDto>.Ok(new ShareUrlDto(id, shareUrl, shareUrl)));
         }
         catch (KeyNotFoundException ex)
         {
@@ -442,7 +428,8 @@ public sealed class PostsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "GetShareUrl thất bại. PostId={PostId}", id);
-            return StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<object>.InternalServerError());
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                ApiResponse<object>.InternalServerError());
         }
     }
 }
