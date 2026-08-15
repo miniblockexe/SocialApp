@@ -1,7 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using SocialApp.API.Extensions;
-using SocialApp.Application.Interfaces.Services;
+using SocialApp.Application.Interfaces.Repositories;
+using SocialApp.Domain.Entities;
 using SocialApp.Domain.Enums;
 using System.Net;
 
@@ -12,26 +12,26 @@ namespace SocialApp.API.Controllers;
 [AllowAnonymous]
 public sealed class ShareController : ControllerBase
 {
-    private readonly IPostService _postService;
+    private readonly IPostRepository _postRepo;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ShareController> _logger;
 
     public ShareController(
-        IPostService postService,
+        IPostRepository postRepo,
         IConfiguration configuration,
         ILogger<ShareController> logger)
     {
-        _postService = postService;
+        _postRepo = postRepo;
         _configuration = configuration;
         _logger = logger;
     }
 
     /// <summary>
-    /// Trả về trang HTML nhỏ với OG meta tags + redirect 0 giây sang Angular frontend.
-    /// Bài private/friends → redirect thẳng (không có OG preview).
+    /// Trả về HTML nhỏ chứa OG meta tags + redirect 0 giây sang Angular frontend.
+    /// Bài private / friends / bị xóa → redirect thẳng (không lộ nội dung qua OG).
     /// </summary>
     [HttpGet("{id:guid}")]
-    [ResponseCache(Duration = 60, Location = ResponseCacheLocation.Any, VaryByHeader = "Accept")]
+    [ResponseCache(Duration = 60, Location = ResponseCacheLocation.Any)]
     public async Task<IActionResult> ShareRedirect(Guid id, CancellationToken ct)
     {
         var frontendBase = (_configuration["FrontendBaseUrl"] ?? "http://localhost:4200").TrimEnd('/');
@@ -39,24 +39,27 @@ public sealed class ShareController : ControllerBase
 
         try
         {
-            // Lấy bài viết — dùng Guid.Empty vì đây là public endpoint không có user
-            var post = await _postService.GetPostByIdAsync(id, Guid.Empty);
+            var post = await _postRepo.FirstOrDefaultAsync(
+                p => p.Id == id && p.DeletedAt == null,
+                ct,
+                p => p.User,
+                p => p.PostMediaFiles);
 
-            // Bài private / friends → redirect thẳng, không lộ nội dung qua OG
-            if (post.Privacy != PostPrivacy.Public)
+            if (post is null || post.Privacy != PostPrivacy.Public)
                 return Redirect(destinationUrl);
 
-            var title = $"{H(post.Author.FullName)} – SocialApp";
+            var title = $"{H(post.User.FullName)} – SocialApp";
             var snippet = post.Content?.Length > 0
                 ? H(post.Content[..Math.Min(200, post.Content.Length)])
-                : $"Xem bài viết của {H(post.Author.FullName)} trên SocialApp";
+                : $"Xem bài viết của {H(post.User.FullName)} trên SocialApp";
 
-            // Ưu tiên ảnh (MediaType.Image = 0) để preview đẹp hơn thumbnail video
-            var imageUrl = post.MediaFiles
+            var imageUrl = post.PostMediaFiles
                 .Where(m => m.MediaType == MediaType.Image)
                 .Select(m => m.MediaUrl)
                 .FirstOrDefault()
-                ?? post.MediaFiles.Select(m => m.MediaUrl).FirstOrDefault()
+                ?? post.PostMediaFiles
+                .Select(m => m.MediaUrl)
+                .FirstOrDefault()
                 ?? string.Empty;
 
             var hasImage = imageUrl.Length > 0;
@@ -105,11 +108,6 @@ public sealed class ShareController : ControllerBase
 
             return Content(html, "text/html; charset=utf-8");
         }
-        catch (KeyNotFoundException)
-        {
-            // Bài không tồn tại / đã xóa → về home thay vì 404
-            return Redirect(frontendBase + "/home");
-        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "ShareRedirect lỗi. PostId={PostId}", id);
@@ -117,6 +115,6 @@ public sealed class ShareController : ControllerBase
         }
     }
 
-    /// <summary>HTML-encode chuỗi để chèn an toàn vào attribute và text node.</summary>
+    /// <summary>HTML-encode an toàn để chèn vào attribute và text node.</summary>
     private static string H(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
 }
