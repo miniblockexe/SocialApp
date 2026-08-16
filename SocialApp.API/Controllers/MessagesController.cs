@@ -242,7 +242,9 @@ public sealed class MessagesController : ControllerBase
         {
             ConversationId = id,
             Content = dto.Content,
-            Attachment = dto.Attachment
+            Attachment = dto.Attachment,
+            GifUrl = dto.GifUrl,
+            SharedPostId = dto.SharedPostId
         };
 
         var validation = await _sendMessageValidator.ValidateAsync(dto);
