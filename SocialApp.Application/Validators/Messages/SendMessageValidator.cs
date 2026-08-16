@@ -29,16 +29,16 @@ public sealed class SendMessageValidator : AbstractValidator<SendMessageDto>
                 .WithMessage("Nội dung tin nhắn không được vượt quá 4000 ký tự.");
         });
 
-        // Phải có Content HOẶC Attachment
         RuleFor(x => x)
             .Must(dto =>
                 !string.IsNullOrWhiteSpace(dto.Content) ||
-                dto.Attachment is not null)
-            .WithMessage("Tin nhắn phải có nội dung hoặc file đính kèm.")
+                dto.Attachment is not null ||
+                dto.GifUrl is not null ||
+                dto.SharedPostId.HasValue)
+            .WithMessage("Tin nhắn phải có nội dung, file đính kèm, GIF hoặc bài viết chia sẻ.")
             .OverridePropertyName("Content");
 
-        // Nếu không có Attachment thì Content sau Trim không được rỗng
-        When(x => x.Attachment is null, () =>
+        When(x => x.Attachment is null && !x.SharedPostId.HasValue && x.GifUrl is null, () =>
         {
             RuleFor(x => x.Content)
                 .NotNull()
