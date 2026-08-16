@@ -34,6 +34,7 @@ public sealed class MessageService : IMessageService
     private readonly IOptions<FileValidationSettings> _fileSettings;
     private readonly ILogger<MessageService> _logger;
     private readonly IChatHub _chatHub;
+    private readonly IPostRepository _postRepo;
 
     // Giới hạn kích thước file (ảnh 10MB, video/audio 50MB)
     private const long MaxImageBytes = 10 * 1024 * 1024;
@@ -50,7 +51,8 @@ public sealed class MessageService : IMessageService
         IMapper mapper,
         IOptions<FileValidationSettings> fileSettings,
         ILogger<MessageService> logger,
-        IChatHub chatHub)
+        IChatHub chatHub,
+        IPostRepository postRepo)
     {
         _db = db;
         _userRepo = userRepo;
@@ -60,6 +62,7 @@ public sealed class MessageService : IMessageService
         _fileSettings = fileSettings;
         _logger = logger;
         _chatHub = chatHub;
+        _postRepo = postRepo;
     }
 
     public async Task<ConversationDto> CreateOrGetConversationAsync(
@@ -285,9 +288,11 @@ public sealed class MessageService : IMessageService
             throw new ForbiddenException("Bạn không có quyền xem tin nhắn trong conversation này.");
 
         var query = _db.Messages
-            .Include(m => m.Sender)
-            .Include(m => m.SeenBy)
-            .Where(m => m.ConversationId == conversationId);
+         .Include(m => m.Sender)
+         .Include(m => m.SeenBy)
+         .Include(m => m.SharedPost).ThenInclude(p => p!.User)            
+         .Include(m => m.SharedPost).ThenInclude(p => p!.PostMediaFiles)   
+         .Where(m => m.ConversationId == conversationId);
 
         var totalCount = await query.CountAsync();
 
@@ -319,9 +324,22 @@ public sealed class MessageService : IMessageService
             throw new ForbiddenException("Bạn không có quyền gửi tin nhắn trong conversation này.");
 
         var trimmedContent = dto.Content?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedContent) && dto.Attachment is null && string.IsNullOrWhiteSpace(dto.GifUrl))
-            throw new ArgumentException("Tin nhắn phải có nội dung, file đính kèm, hoặc GIF.");
+        if (string.IsNullOrWhiteSpace(trimmedContent)
+          && dto.Attachment is null
+          && string.IsNullOrWhiteSpace(dto.GifUrl)
+          && dto.SharedPostId is null)
+            throw new ArgumentException("Tin nhắn phải có nội dung, file đính kèm, GIF, hoặc bài viết chia sẻ.");
+        Guid? sharedPostId = null;
+        if (dto.SharedPostId.HasValue)
+        {
+            var sharedPost = await _postRepo.FirstOrDefaultAsync(
+                p => p.Id == dto.SharedPostId.Value && p.DeletedAt == null);
 
+            if (sharedPost is null)
+                throw new KeyNotFoundException($"Bài viết {dto.SharedPostId} không tồn tại hoặc đã bị xóa.");
+
+            sharedPostId = sharedPost.Id;
+        }
         string? attachmentUrl = null;
         string? attachmentType = null;
         string? r2ObjectKey = null;
@@ -396,6 +414,7 @@ public sealed class MessageService : IMessageService
             Content = string.IsNullOrWhiteSpace(trimmedContent) ? null : trimmedContent,
             AttachmentUrl = attachmentUrl,
             AttachmentType = attachmentType,
+            SharedPostId = sharedPostId,
             IsAI = false,
             IsDeleted = false,
             CreatedAt = DateTime.UtcNow
@@ -448,7 +467,14 @@ public sealed class MessageService : IMessageService
         var sender = await _userRepo.GetByIdAsync(senderId);
         message.Sender = sender!;
         message.SeenBy = [new MessageSeen { MessageId = message.Id, UserId = senderId }];
-
+        if (message.SharedPostId.HasValue)
+        {
+            message.SharedPost = await _postRepo.FirstOrDefaultAsync(
+                p => p.Id == message.SharedPostId.Value,
+                default,
+                p => p.User,
+                p => p.PostMediaFiles);
+        }
         _logger.LogInformation(
             "Message sent: MessageId={MessageId}, ConvId={ConvId}, Sender={SenderId}",
             message.Id, dto.ConversationId, senderId);
@@ -707,6 +733,36 @@ public sealed class MessageService : IMessageService
     /// <summary>Map Message entity → MessageDto, ẩn content/attachment nếu IsDeleted.</summary>
     private static MessageDto MapToMessageDto(Message m)
     {
+        // Build shared post preview
+        SharedPostPreviewDto? sharedPostPreview = null;
+        if (!m.IsDeleted && m.SharedPostId.HasValue)
+        {
+            if (m.SharedPost is null || m.SharedPost.DeletedAt != null)
+            {
+                sharedPostPreview = new SharedPostPreviewDto
+                {
+                    PostId = m.SharedPostId.Value,
+                    IsDeleted = true,
+                };
+            }
+            else
+            {
+                var p = m.SharedPost;
+                sharedPostPreview = new SharedPostPreviewDto
+                {
+                    PostId = p.Id,
+                    AuthorName = p.User.FullName,
+                    AuthorAvatarUrl = p.User.AvatarUrl,
+                    ContentSnippet = p.Content?[..Math.Min(200, p.Content.Length)],
+                    ThumbnailUrl = p.PostMediaFiles
+                        .OrderBy(f => f.CreatedAt)
+                        .Select(f => f.MediaUrl)
+                        .FirstOrDefault(),
+                    IsDeleted = false,
+                };
+            }
+        }
+
         return new MessageDto
         {
             Id = m.Id,
@@ -715,6 +771,7 @@ public sealed class MessageService : IMessageService
             IsAI = m.IsAI,
             AttachmentUrl = m.IsDeleted ? null : m.AttachmentUrl,
             AttachmentType = m.IsDeleted ? null : m.AttachmentType,
+            SharedPost = sharedPostPreview, 
             CreatedAt = m.CreatedAt,
             IsDeleted = m.IsDeleted,
             Sender = new UserBriefDto

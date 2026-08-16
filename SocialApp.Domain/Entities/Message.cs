@@ -10,15 +10,15 @@ public class Message
     /// <summary>Primary key.</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>FK → Conversation chứa tin nhắn này.</summary>
+    /// <summary> Conversation chứa tin nhắn này.</summary>
     public Guid ConversationId { get; set; }
 
-    /// <summary>FK → User gửi tin nhắn.</summary>
+    /// <summary>User gửi tin nhắn.</summary>
     public Guid SenderId { get; set; }
 
     /// <summary>
     /// Nội dung tin nhắn — tối đa 4000 ký tự.
-    /// Nullable: tin nhắn chỉ có attachment không cần content.
+    /// Nullable: tin nhắn chỉ có attachment hoặc shared post không cần content.
     /// </summary>
     public string? Content { get; set; }
 
@@ -38,6 +38,12 @@ public class Message
     public string? AttachmentType { get; set; }
 
     /// <summary>
+    /// Post được chia sẻ vào cuộc trò chuyện — nullable.
+    /// Khi có: client render card preview bài viết trong bubble tin nhắn.
+    /// </summary>
+    public Guid? SharedPostId { get; set; }
+
+    /// <summary>
     /// Soft-delete: True = tin nhắn đã bị xoá (hiển thị "Tin nhắn đã được thu hồi").
     /// Không xoá vật lý để giữ ngữ cảnh hội thoại.
     /// </summary>
@@ -46,13 +52,14 @@ public class Message
     /// <summary>Thời điểm gửi (UTC).</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // Navigation properties
-
     /// <summary>Hội thoại chứa tin nhắn này.</summary>
     public Conversation Conversation { get; set; } = null!;
 
     /// <summary>User gửi tin nhắn.</summary>
     public User Sender { get; set; } = null!;
+
+    /// <summary>Bài viết được chia sẻ — null nếu không phải tin nhắn share.</summary>
+    public Post? SharedPost { get; set; }
 
     /// <summary>Danh sách user đã đọc tin nhắn này.</summary>
     public ICollection<MessageSeen> SeenBy { get; set; } = new List<MessageSeen>();

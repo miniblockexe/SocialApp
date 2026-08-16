@@ -5,8 +5,7 @@ namespace SocialApp.Application.DTOs.Messages;
 /// <summary>
 /// DTO đại diện cho một tin nhắn trả về client.
 /// Dùng cho GET messages, SignalR ReceiveMessage, DeleteMessage.
-/// Nếu IsDeleted = true: Content = null, AttachmentUrl = null
-/// — client hiển thị "Tin nhắn đã bị xóa".
+/// Nếu IsDeleted = true: Content = null, AttachmentUrl = null, SharedPost = null.
 /// </summary>
 public sealed class MessageDto
 {
@@ -17,7 +16,7 @@ public sealed class MessageDto
     public Guid ConversationId { get; init; }
 
     /// <summary>
-    /// Nội dung tin nhắn — null nếu IsDeleted = true hoặc tin nhắn chỉ có file.
+    /// Nội dung tin nhắn — null nếu IsDeleted = true hoặc tin nhắn chỉ có file/shared post.
     /// </summary>
     public string? Content { get; init; }
 
@@ -30,9 +29,15 @@ public sealed class MessageDto
     public string? AttachmentUrl { get; init; }
 
     /// <summary>
-    /// Loại file đính kèm: "image" | "video" | "audio" | null.
+    /// Loại file đính kèm: "image" | "video" | "audio" | "gif" | null.
     /// </summary>
     public string? AttachmentType { get; init; }
+
+    /// <summary>
+    /// Preview bài viết được chia sẻ — null nếu không phải tin nhắn share.
+    /// Khi IsDeleted = true: null.
+    /// </summary>
+    public SharedPostPreviewDto? SharedPost { get; init; }
 
     /// <summary>Thời điểm tạo tin nhắn (UTC).</summary>
     public DateTime CreatedAt { get; init; }

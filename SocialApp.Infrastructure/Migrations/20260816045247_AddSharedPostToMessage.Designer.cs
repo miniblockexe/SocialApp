@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SocialApp.Infrastructure.Data;
@@ -11,9 +12,11 @@ using SocialApp.Infrastructure.Data;
 namespace SocialApp.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260816045247_AddSharedPostToMessage")]
+    partial class AddSharedPostToMessage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -223,8 +226,7 @@ namespace SocialApp.Infrastructure.Migrations
 
                     b.HasIndex("SenderId");
 
-                    b.HasIndex("SharedPostId")
-                        .HasDatabaseName("IX_Messages_SharedPostId");
+                    b.HasIndex("SharedPostId");
 
                     b.HasIndex("ConversationId", "CreatedAt")
                         .HasDatabaseName("IX_Messages_ConversationId_CreatedAt");
@@ -644,8 +646,7 @@ namespace SocialApp.Infrastructure.Migrations
 
                     b.HasOne("SocialApp.Domain.Entities.Post", "SharedPost")
                         .WithMany()
-                        .HasForeignKey("SharedPostId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .HasForeignKey("SharedPostId");
 
                     b.Navigation("Conversation");
 

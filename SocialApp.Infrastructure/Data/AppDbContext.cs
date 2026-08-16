@@ -310,6 +310,16 @@ internal sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
 
         builder.HasOne(m => m.Conversation).WithMany(c => c.Messages).HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(m => m.Sender).WithMany(u => u.SentMessages).HasForeignKey(m => m.SenderId).OnDelete(DeleteBehavior.Restrict);
+        builder.Property(m => m.SharedPostId).IsRequired(false);
+
+        builder.HasOne(m => m.SharedPost)
+               .WithMany()
+               .HasForeignKey(m => m.SharedPostId)
+               .IsRequired(false)
+               .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(m => m.SharedPostId)
+               .HasDatabaseName("IX_Messages_SharedPostId");
     }
 }
 

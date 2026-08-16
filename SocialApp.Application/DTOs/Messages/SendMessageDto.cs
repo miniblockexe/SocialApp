@@ -4,7 +4,7 @@ namespace SocialApp.Application.DTOs.Messages;
 
 /// <summary>
 /// DTO gửi tin nhắn qua HTTP (multipart/form-data).
-/// Ít nhất một trong ba trường phải có: Content, Attachment, hoặc GifUrl.
+/// Ít nhất một trong bốn trường phải có: Content, Attachment, GifUrl, hoặc SharedPostId.
 /// </summary>
 public sealed class SendMessageDto
 {
@@ -12,7 +12,7 @@ public sealed class SendMessageDto
     public Guid ConversationId { get; init; }
 
     /// <summary>
-    /// Nội dung tin nhắn văn bản — nullable vì có thể gửi file không kèm text.
+    /// Nội dung tin nhắn văn bản — nullable vì có thể gửi file hoặc share post không kèm text.
     /// Nếu có: tối đa 4000 ký tự, không được toàn whitespace.
     /// </summary>
     public string? Content { get; init; }
@@ -30,4 +30,12 @@ public sealed class SendMessageDto
     /// AttachmentType sẽ được set = "gif" tự động trong MessageService.
     /// </summary>
     public string? GifUrl { get; init; }
+
+    /// <summary>
+    /// Id bài viết được chia sẻ vào chat — nullable.
+    /// Khi có: MessageService lưu SharedPostId vào Message,
+    /// client render card preview bài viết trong bubble.
+    /// Có thể kèm Content (caption) hoặc không.
+    /// </summary>
+    public Guid? SharedPostId { get; init; }
 }
