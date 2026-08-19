@@ -26,6 +26,10 @@ public class AppDbContext : DbContext, IMessageDbContext, IAdminDbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<MessageSeen> MessageSeens => Set<MessageSeen>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Group> Groups => Set<Group>();
+    public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
+    public DbSet<GroupPost> GroupPosts => Set<GroupPost>();
+    public DbSet<GroupJoinRequest> GroupJoinRequests => Set<GroupJoinRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -198,6 +202,15 @@ internal sealed class PostConfiguration : IEntityTypeConfiguration<Post>
                .IsRequired(false)
                .OnDelete(DeleteBehavior.SetNull);
         builder.HasIndex(p => p.OriginalPostId).HasDatabaseName("IX_Posts_OriginalPostId");
+
+        // Group relationship
+        builder.Property(p => p.GroupId).IsRequired(false);
+        builder.HasIndex(p => p.GroupId).HasDatabaseName("IX_Posts_GroupId");
+        builder.HasOne(p => p.Group)
+               .WithMany()
+               .HasForeignKey(p => p.GroupId)
+               .IsRequired(false)
+               .OnDelete(DeleteBehavior.SetNull);
     }
 }
 
@@ -352,5 +365,113 @@ internal sealed class NotificationConfiguration : IEntityTypeConfiguration<Notif
 
         builder.HasOne(n => n.User).WithMany(u => u.Notifications).HasForeignKey(n => n.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(n => n.Actor).WithMany().HasForeignKey(n => n.ActorId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class GroupConfiguration : IEntityTypeConfiguration<Group>
+{
+    public void Configure(EntityTypeBuilder<Group> builder)
+    {
+        builder.ToTable("Groups");
+        builder.HasKey(g => g.Id);
+        builder.Property(g => g.Name).IsRequired().HasMaxLength(100);
+        builder.Property(g => g.Description).HasMaxLength(1000);
+        builder.Property(g => g.AvatarUrl).HasMaxLength(1024);
+        builder.Property(g => g.AvatarPublicId).HasMaxLength(512);
+        builder.Property(g => g.CoverUrl).HasMaxLength(1024);
+        builder.Property(g => g.CoverPublicId).HasMaxLength(512);
+        builder.Property(g => g.Privacy).HasConversion<int>().HasDefaultValue(GroupPrivacy.Public);
+        builder.Property(g => g.RequireApproval).HasDefaultValue(false);
+        builder.Property(g => g.RequirePostApproval).HasDefaultValue(false);
+
+        builder.HasIndex(g => g.Name).HasDatabaseName("IX_Groups_Name");
+        builder.HasIndex(g => g.OwnerId).HasDatabaseName("IX_Groups_OwnerId");
+
+        builder.HasOne(g => g.Owner)
+               .WithMany()
+               .HasForeignKey(g => g.OwnerId)
+               .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(g => g.Members)
+               .WithOne(m => m.Group)
+               .HasForeignKey(m => m.GroupId)
+               .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(g => g.JoinRequests)
+               .WithOne(r => r.Group)
+               .HasForeignKey(r => r.GroupId)
+               .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+internal sealed class GroupMemberConfiguration : IEntityTypeConfiguration<GroupMember>
+{
+    public void Configure(EntityTypeBuilder<GroupMember> builder)
+    {
+        builder.ToTable("GroupMembers");
+        builder.HasKey(m => new { m.GroupId, m.UserId });
+        builder.Property(m => m.Role).HasConversion<int>().HasDefaultValue(GroupRole.Member);
+        builder.Property(m => m.JoinedAt).IsRequired();
+
+        builder.HasIndex(m => m.UserId).HasDatabaseName("IX_GroupMembers_UserId");
+        builder.HasIndex(m => new { m.GroupId, m.Role }).HasDatabaseName("IX_GroupMembers_GroupId_Role");
+
+        builder.HasOne(m => m.User)
+               .WithMany()
+               .HasForeignKey(m => m.UserId)
+               .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class GroupPostConfiguration : IEntityTypeConfiguration<GroupPost>
+{
+    public void Configure(EntityTypeBuilder<GroupPost> builder)
+    {
+        builder.ToTable("GroupPosts");
+        builder.HasKey(gp => new { gp.PostId, gp.GroupId });
+        builder.Property(gp => gp.Status).HasConversion<int>().HasDefaultValue(GroupPostStatus.Approved);
+
+        builder.HasIndex(gp => new { gp.GroupId, gp.Status }).HasDatabaseName("IX_GroupPosts_GroupId_Status");
+
+        builder.HasOne(gp => gp.Post)
+               .WithOne(p => p.GroupPost)
+               .HasForeignKey<GroupPost>(gp => gp.PostId)
+               .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(gp => gp.Group)
+               .WithMany(g => g.GroupPosts)
+               .HasForeignKey(gp => gp.GroupId)
+               .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(gp => gp.ReviewedBy)
+               .WithMany()
+               .HasForeignKey(gp => gp.ReviewedByUserId)
+               .IsRequired(false)
+               .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+internal sealed class GroupJoinRequestConfiguration : IEntityTypeConfiguration<GroupJoinRequest>
+{
+    public void Configure(EntityTypeBuilder<GroupJoinRequest> builder)
+    {
+        builder.ToTable("GroupJoinRequests");
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Status).HasConversion<int>().HasDefaultValue(JoinRequestStatus.Pending);
+        builder.Property(r => r.RejectReason).HasMaxLength(500);
+
+        builder.HasIndex(r => new { r.GroupId, r.UserId, r.Status })
+               .HasDatabaseName("IX_GroupJoinRequests_GroupId_UserId_Status");
+
+        builder.HasOne(r => r.User)
+               .WithMany()
+               .HasForeignKey(r => r.UserId)
+               .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(r => r.ReviewedBy)
+               .WithMany()
+               .HasForeignKey(r => r.ReviewedByUserId)
+               .IsRequired(false)
+               .OnDelete(DeleteBehavior.SetNull);
     }
 }

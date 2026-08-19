@@ -28,13 +28,6 @@ public sealed class SharedPostPreviewDto
     public string? ThumbnailUrl { get; init; }
 
     /// <summary>
-    /// Loại media của thumbnail ("image" | "video") — giúp client
-    /// hiển thị SVG video icon thay vì &lt;img&gt; khi là video.
-    /// Null nếu bài không có media.
-    /// </summary>
-    public string? ThumbnailMediaType { get; init; }
-
-    /// <summary>
     /// True = bài đã bị xóa sau khi được share.
     /// Client hiển thị "Bài viết đã bị xóa" thay vì card preview.
     /// </summary>
