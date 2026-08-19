@@ -44,4 +44,13 @@ public class Post : BaseAuditableEntity
 
     /// <summary>Các bài đã chia sẻ lại bài này (inverse của OriginalPost).</summary>
     public ICollection<Post> Shares { get; set; } = new List<Post>();
+
+    /// <summary>FK → Group nếu bài thuộc nhóm, null nếu bài cá nhân.</summary>
+    public Guid? GroupId { get; set; }
+
+    /// <summary>Navigation → Group (null nếu bài cá nhân).</summary>
+    public Group? Group { get; set; }
+
+    /// <summary>Metadata duyệt bài trong nhóm (null nếu bài cá nhân).</summary>
+    public GroupPost? GroupPost { get; set; }
 }

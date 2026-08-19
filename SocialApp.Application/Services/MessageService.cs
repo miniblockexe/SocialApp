@@ -290,8 +290,8 @@ public sealed class MessageService : IMessageService
         var query = _db.Messages
          .Include(m => m.Sender)
          .Include(m => m.SeenBy)
-         .Include(m => m.SharedPost).ThenInclude(p => p!.User)
-         .Include(m => m.SharedPost).ThenInclude(p => p!.PostMediaFiles)
+         .Include(m => m.SharedPost).ThenInclude(p => p!.User)            
+         .Include(m => m.SharedPost).ThenInclude(p => p!.PostMediaFiles)   
          .Where(m => m.ConversationId == conversationId);
 
         var totalCount = await query.CountAsync();
@@ -748,20 +748,16 @@ public sealed class MessageService : IMessageService
             else
             {
                 var p = m.SharedPost;
-                var firstMedia = p.PostMediaFiles.OrderBy(f => f.CreatedAt).FirstOrDefault();
                 sharedPostPreview = new SharedPostPreviewDto
                 {
                     PostId = p.Id,
                     AuthorName = p.User.FullName,
                     AuthorAvatarUrl = p.User.AvatarUrl,
                     ContentSnippet = p.Content?[..Math.Min(200, p.Content.Length)],
-                    ThumbnailUrl = firstMedia?.MediaUrl,
-                    ThumbnailMediaType = firstMedia?.MediaType switch
-                    {
-                        Domain.Enums.MediaType.Video => "video",
-                        Domain.Enums.MediaType.Image => "image",
-                        _ => null
-                    },
+                    ThumbnailUrl = p.PostMediaFiles
+                        .OrderBy(f => f.CreatedAt)
+                        .Select(f => f.MediaUrl)
+                        .FirstOrDefault(),
                     IsDeleted = false,
                 };
             }
@@ -775,7 +771,7 @@ public sealed class MessageService : IMessageService
             IsAI = m.IsAI,
             AttachmentUrl = m.IsDeleted ? null : m.AttachmentUrl,
             AttachmentType = m.IsDeleted ? null : m.AttachmentType,
-            SharedPost = sharedPostPreview,
+            SharedPost = sharedPostPreview, 
             CreatedAt = m.CreatedAt,
             IsDeleted = m.IsDeleted,
             Sender = new UserBriefDto

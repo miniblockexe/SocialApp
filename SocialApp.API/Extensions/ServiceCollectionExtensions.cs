@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using SocialApp.API.Middleware;
+using SocialApp.Application.Interfaces.Repositories;
+using SocialApp.Application.Interfaces.Services;
 using SocialApp.Infrastructure.Data;
 using SocialApp.Infrastructure.Services;
 using SocialApp.Application.Interfaces.Services;
@@ -382,6 +384,12 @@ public static class ServiceCollectionExtensions
         // IAdminService
         services.AddScoped<IAdminService,
             SocialApp.Application.Services.AdminService>();
+
+        // IGroupRepository & IGroupService
+        services.AddScoped<IGroupRepository,
+            SocialApp.Infrastructure.Repositories.GroupRepository>();
+        services.AddScoped<IGroupService,
+            SocialApp.Application.Services.GroupService>();
 
         // External API Services
         services.AddHttpClient<SocialApp.Application.Interfaces.Services.IEmailVerificationService,
