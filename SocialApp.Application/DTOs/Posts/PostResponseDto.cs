@@ -45,8 +45,14 @@ public sealed class PostResponseDto
     public bool IsSharedByMe { get; set; }
 
     /// <summary>
-    /// Bài gốc được nhúng bên trong 
+    /// Bài gốc được nhúng bên trong.
     /// Null = bài đăng thông thường.
     /// </summary>
     public OriginalPostDto? OriginalPost { get; set; }
+
+    /// <summary>Id nhóm nếu bài đăng trong nhóm. Null = bài đăng cá nhân.</summary>
+    public Guid? GroupId { get; init; }
+
+    /// <summary>Tên nhóm nếu bài đăng trong nhóm. Null = bài đăng cá nhân.</summary>
+    public string? GroupName { get; set; }
 }
