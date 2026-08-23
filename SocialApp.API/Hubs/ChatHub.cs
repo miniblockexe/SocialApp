@@ -284,4 +284,39 @@ public sealed class ChatHub : Hub
             });
         }
     }
+    /// <summary>
+    /// Thông báo cuộc gọi đến cho peer qua SignalR.
+    /// </summary>
+    public async Task CallInvite(Guid conversationId, string mode)
+    {
+        var callerId = Context.User?.GetUserId() ?? Guid.Empty;
+        if (callerId == Guid.Empty) return;
+
+        var caller = await _userRepo.GetByIdAsync(callerId);
+        if (caller is null) return;
+
+        await Clients
+            .OthersInGroup(HubGroups.Conversation(conversationId))
+            .SendAsync("IncomingCall", new
+            {
+                conversationId,
+                callerId,
+                callerName = caller.FullName,
+                callerAvatar = caller.AvatarUrl,
+                mode // "audio" | "video"
+            });
+    }
+
+    /// <summary>
+    /// Báo cho caller biết callee từ chối.
+    /// </summary>
+    public async Task CallDeclined(Guid conversationId)
+    {
+        var userId = Context.User?.GetUserId() ?? Guid.Empty;
+        if (userId == Guid.Empty) return;
+
+        await Clients
+            .OthersInGroup(HubGroups.Conversation(conversationId))
+            .SendAsync("CallDeclined", new { conversationId, userId });
+    }
 }
