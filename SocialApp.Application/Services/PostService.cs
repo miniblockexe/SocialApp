@@ -259,7 +259,8 @@ public sealed class PostService : IPostService
                 ),
             orderBy: p => p.CreatedAt,
             ct: default,
-            includes: [p => p.User, p => p.PostMediaFiles]);
+            // ✅ Thêm p.Group để BuildPostResponsesAsync có thể đọc GroupName
+            includes: [p => p.User, p => p.PostMediaFiles, p => p.Group!]);
 
         var dtos = await BuildPostResponsesAsync(result.Items, userId);
 
@@ -285,7 +286,8 @@ public sealed class PostService : IPostService
                 ),
             orderBy: p => p.CreatedAt,
             ct: default,
-            includes: [p => p.User, p => p.PostMediaFiles]);
+            // ✅ Thêm p.Group để BuildPostResponsesAsync có thể đọc GroupName
+            includes: [p => p.User, p => p.PostMediaFiles, p => p.Group!]);
 
         var dtos = await BuildPostResponsesAsync(result.Items, viewerId);
 
@@ -555,6 +557,14 @@ public sealed class PostService : IPostService
             dto.ShareCount = shareCounts.GetValueOrDefault(post.Id, 0);
             dto.IsSharedByMe = sharedByMe.Contains(post.Id);
 
+            // ✅ Gán GroupName từ navigation property Group (đã include ở GetFeedAsync / GetUserPostsAsync)
+            // GroupId đã được AutoMapper map tự động theo convention (Post.GroupId → dto.GroupId).
+            // GroupName không có trên entity nên phải set thủ công ở đây.
+            if (post.Group is not null)
+            {
+                dto.GroupName = post.Group.Name;
+            }
+
             if (post.OriginalPostId.HasValue &&
                 originalPosts.TryGetValue(post.OriginalPostId.Value, out var orig))
             {
@@ -758,7 +768,6 @@ public sealed class PostService : IPostService
         return (MediaType.Audio, StorageProvider.R2);
     }
 
-    // Xóa toàn bộ method body, thay bằng:
     private async Task<PostMediaUploadResult> UploadPostMediaAsync(IFormFile file, Guid postId, int index)
     {
         var result = await _cloudService.UploadMediaAsync(file, $"posts/{postId}");

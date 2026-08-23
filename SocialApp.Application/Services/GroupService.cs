@@ -1,5 +1,6 @@
 using AutoMapper;
 using CloudinaryDotNet.Actions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using SocialApp.Application.Common;
 using SocialApp.Application.DTOs.Auth;
@@ -19,6 +20,8 @@ public sealed class GroupService : IGroupService
     private readonly ILikeRepository _likeRepo;
     private readonly INotificationService _notifService;
     private readonly ICloudinaryService _cloudinaryService;
+    // ✅ Thêm ICloudService để upload media bài đăng (ảnh/video) trong nhóm
+    private readonly ICloudService _cloudService;
     private readonly IMapper _mapper;
     private readonly ILogger<GroupService> _logger;
 
@@ -28,6 +31,7 @@ public sealed class GroupService : IGroupService
         ILikeRepository likeRepo,
         INotificationService notifService,
         ICloudinaryService cloudinaryService,
+        ICloudService cloudService,
         IMapper mapper,
         ILogger<GroupService> logger)
     {
@@ -36,6 +40,7 @@ public sealed class GroupService : IGroupService
         _likeRepo = likeRepo;
         _notifService = notifService;
         _cloudinaryService = cloudinaryService;
+        _cloudService = cloudService;
         _mapper = mapper;
         _logger = logger;
     }
@@ -360,7 +365,9 @@ public sealed class GroupService : IGroupService
         {
             await _groupRepo.AddMemberAsync(new GroupMember
             {
-                GroupId = groupId, UserId = userId, Role = GroupRole.Member
+                GroupId = groupId,
+                UserId = userId,
+                Role = GroupRole.Member
             }, ct);
             role = GroupRole.Member;
         }
@@ -376,7 +383,60 @@ public sealed class GroupService : IGroupService
         };
 
         await _postRepo.AddAsync(post, ct);
-        await _postRepo.SaveChangesAsync(ct);
+        await _postRepo.SaveChangesAsync(ct); // lưu trước để có post.Id cho folder upload cloud
+
+        // ✅ Upload media files nếu có (fix: trước đây bỏ qua hoàn toàn dto.MediaFiles)
+        var files = dto.MediaFiles;
+        if (files is not null && files.Count > 0)
+        {
+            var uploaded = new List<(string Url, string PublicId, long Size, MediaType MediaType, StorageProvider StorageProvider)>();
+
+            try
+            {
+                var uploadTasks = files.Select(f => _cloudService.UploadMediaAsync(f, $"posts/{post.Id}", ct));
+                var results = await Task.WhenAll(uploadTasks);
+                uploaded.AddRange(results.Select(r => (r.SecureUrl, r.PublicId, r.FileSize, r.MediaType, r.StorageProvider)));
+
+                var mediaFiles = results.Select(r => new PostMediaFile
+                {
+                    PostId = post.Id,
+                    MediaUrl = r.SecureUrl,
+                    PublicId = r.PublicId,
+                    MediaType = r.MediaType,
+                    StorageProvider = r.StorageProvider,
+                    FileSize = r.FileSize,
+                });
+
+                await _postRepo.AddMediaFilesAsync(mediaFiles, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "[GroupService] Upload media thất bại, rollback — PostId: {PostId}, GroupId: {GroupId}",
+                    post.Id, groupId);
+
+                // Cleanup các file đã upload thành công trước khi throw
+                foreach (var (_, publicId, _, mediaType, storageProvider) in uploaded)
+                {
+                    try { await _cloudService.DeleteMediaAsync(publicId, storageProvider, mediaType); }
+                    catch (Exception cleanupEx)
+                    {
+                        _logger.LogError(cleanupEx,
+                            "[GroupService] Cleanup file cloud thất bại — PublicId: {PublicId}", publicId);
+                    }
+                }
+
+                // Soft-delete post vừa tạo để tránh orphan record
+                try { await _postRepo.ExecuteSoftDeleteAsync(p => p.Id == post.Id); }
+                catch (Exception rollbackEx)
+                {
+                    _logger.LogError(rollbackEx,
+                        "[GroupService] Rollback DB thất bại — PostId: {PostId}. Post bị orphan.", post.Id);
+                }
+
+                throw new InvalidOperationException("Upload thất bại, vui lòng thử lại sau.");
+            }
+        }
 
         var groupPost = new GroupPost
         {
@@ -387,23 +447,40 @@ public sealed class GroupService : IGroupService
         await _groupRepo.AddGroupPostAsync(groupPost, ct);
         await _groupRepo.SaveChangesAsync(ct);
 
-        _logger.LogInformation("[GroupService] Tạo bài nhóm — PostId: {PostId}, GroupId: {GroupId}, Pending: {Pending}", post.Id, groupId, requireApproval);
+        _logger.LogInformation(
+            "[GroupService] Tạo bài nhóm — PostId: {PostId}, GroupId: {GroupId}, Pending: {Pending}",
+            post.Id, groupId, requireApproval);
+
+        // Load lại post đầy đủ (bao gồm MediaFiles) để trả về đúng data
+        var savedPost = await _postRepo.FirstOrDefaultAsync(
+            p => p.Id == post.Id, ct, p => p.User, p => p.PostMediaFiles);
 
         return new PostResponseDto
         {
-            Id = post.Id,
-            Content = post.Content,
-            Privacy = post.Privacy,
-            CreatedAt = post.CreatedAt,
-            UpdatedAt = post.UpdatedAt,
-            Author = new UserBriefDto { Id = userId },
-            MediaFiles = [],
+            Id = savedPost!.Id,
+            Content = savedPost.Content,
+            Privacy = savedPost.Privacy,
+            CreatedAt = savedPost.CreatedAt,
+            UpdatedAt = savedPost.UpdatedAt,
+            Author = _mapper.Map<UserBriefDto>(savedPost.User),
+            // ✅ Trả về đúng MediaFiles đã upload thay vì []
+            MediaFiles = savedPost.PostMediaFiles.Select(mf => new PostMediaDto
+            {
+                Id = mf.Id,
+                MediaUrl = mf.MediaUrl,
+                MediaType = mf.MediaType,
+                StorageProvider = mf.StorageProvider,
+                FileSize = mf.FileSize,
+            }).ToList(),
             LikeCount = 0,
             CommentCount = 0,
             IsLikedByMe = false,
             IsOwner = true,
             ShareCount = 0,
             IsSharedByMe = false,
+            // ✅ Trả về GroupId và GroupName để frontend hiển thị "Tên người đăng › Tên nhóm"
+            GroupId = groupId,
+            GroupName = group.Name,
         };
     }
 
@@ -445,6 +522,9 @@ public sealed class GroupService : IGroupService
             IsOwner = p.UserId == viewerId,
             ShareCount = 0,
             IsSharedByMe = false,
+            // ✅ Gán GroupId và GroupName vào từng bài để post-card hiển thị "Tên người đăng › Tên nhóm"
+            GroupId = groupId,
+            GroupName = group.Name,
         }).ToList();
 
         return PagedResult<PostResponseDto>.Create(dtos, dtos.Count, page, size);
@@ -460,6 +540,9 @@ public sealed class GroupService : IGroupService
 
         size = Math.Min(size, 50);
         var posts = await _groupRepo.GetPendingPostsPagedAsync(groupId, page, size, ct);
+
+        // ✅ Load tên nhóm một lần để gán vào tất cả bài trong batch
+        var group = await _groupRepo.GetByIdAsync(groupId, ct: ct);
 
         var dtos = posts.Select(p => new PostResponseDto
         {
@@ -483,6 +566,9 @@ public sealed class GroupService : IGroupService
             IsOwner = p.UserId == requesterId,
             ShareCount = 0,
             IsSharedByMe = false,
+            // ✅ Gán GroupId và GroupName
+            GroupId = groupId,
+            GroupName = group?.Name,
         }).ToList();
 
         return PagedResult<PostResponseDto>.Create(dtos, dtos.Count, page, size);
