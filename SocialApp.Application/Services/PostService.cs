@@ -29,14 +29,16 @@ public sealed class PostService : IPostService
     private readonly ILikeRepository _likeRepo;
     private readonly INotificationRepository _notificationRepo;
     private readonly IFriendRequestRepository _friendRepo;
+    // ✅ Inject IGroupRepository để lấy danh sách nhóm viewer đã tham gia (dùng trong GetFeedAsync)
+    private readonly IGroupRepository _groupRepo;
     private readonly ICloudService _cloudService;
     private readonly IMapper _mapper;
     private readonly ILogger<PostService> _logger;
     private readonly FileValidationSettings _fileValidation;
     private readonly CloudflareR2Settings _r2Settings;
-
     private readonly IProfanityFilterService _profanityFilter;
-    private const long MaxImageBytes = 200 * 1024 * 1024; // 200MB — theo tinh thần spec gốc cho ảnh
+
+    private const long MaxImageBytes = 200 * 1024 * 1024; // 200MB
 
     public PostService(
         IPostRepository postRepo,
@@ -44,6 +46,7 @@ public sealed class PostService : IPostService
         ILikeRepository likeRepo,
         INotificationRepository notificationRepo,
         IFriendRequestRepository friendRepo,
+        IGroupRepository groupRepo,
         ICloudService cloudService,
         IMapper mapper,
         ILogger<PostService> logger,
@@ -56,6 +59,7 @@ public sealed class PostService : IPostService
         _likeRepo = likeRepo;
         _notificationRepo = notificationRepo;
         _friendRepo = friendRepo;
+        _groupRepo = groupRepo;
         _cloudService = cloudService;
         _mapper = mapper;
         _logger = logger;
@@ -74,14 +78,12 @@ public sealed class PostService : IPostService
         if (!hasContent && !hasMedia)
             throw new ArgumentException("Bài đăng phải có nội dung hoặc ít nhất 1 file media.");
 
-        // PurgoMalum: lọc từ ngữ tục tĩu trong nội dung bài đăng
         if (hasContent && await _profanityFilter.ContainsProfanityAsync(content!))
         {
             _logger.LogWarning("[CreatePostAsync] Profanity detected — UserId: {UserId}", userId);
             throw new ArgumentException("Nội dung bài đăng chứa từ ngữ không phù hợp.");
         }
 
-        // Validate TRƯỚC khi tạo Post — tránh phải rollback vì lỗi input đơn giản (client gửi sai định dạng).
         if (hasMedia)
         {
             foreach (var file in files!)
@@ -96,7 +98,7 @@ public sealed class PostService : IPostService
         };
 
         await _postRepo.AddAsync(post);
-        await _postRepo.SaveChangesAsync(); // lưu trước để có post.Id cho folder upload cloud
+        await _postRepo.SaveChangesAsync();
 
         if (hasMedia)
         {
@@ -118,9 +120,6 @@ public sealed class PostService : IPostService
                     FileSize = r.Size
                 });
 
-                // AddMediaFilesAsync insert trực tiếp vào DbSet<PostMediaFile>,
-                // không đụng Post entity -> tránh EF mark Post Modified
-                // -> tránh DbUpdateConcurrencyException do Privacy HasDefaultValue.
                 await _postRepo.AddMediaFilesAsync(mediaFiles);
             }
             catch (Exception ex)
@@ -131,10 +130,7 @@ public sealed class PostService : IPostService
 
                 foreach (var r in uploaded)
                 {
-                    try
-                    {
-                        await _cloudService.DeleteMediaAsync(r.PublicId, r.StorageProvider, r.MediaType);
-                    }
+                    try { await _cloudService.DeleteMediaAsync(r.PublicId, r.StorageProvider, r.MediaType); }
                     catch (Exception cleanupEx)
                     {
                         _logger.LogError(cleanupEx,
@@ -142,16 +138,7 @@ public sealed class PostService : IPostService
                     }
                 }
 
-                // Dùng ExecuteUpdateAsync thay vì Update+SaveChanges để tránh DbUpdateConcurrencyException:
-                // - Update() trên entity untracked (AsNoTracking) đánh dấu TẤT CẢ property là Modified,
-                //   bao gồm Privacy có HasDefaultValue → Npgsql sinh WHERE clause thừa → 0 rows affected
-                //   → DbUpdateConcurrencyException → post bị orphan.
-                // - ExecuteUpdateAsync sinh trực tiếp: UPDATE Posts SET DeletedAt=... WHERE Id=...
-                //   không qua change tracker, không có concurrency predicate, luôn trúng đúng 1 row.
-                try
-                {
-                    await _postRepo.ExecuteSoftDeleteAsync(p => p.Id == post.Id);
-                }
+                try { await _postRepo.ExecuteSoftDeleteAsync(p => p.Id == post.Id); }
                 catch (Exception rollbackEx)
                 {
                     _logger.LogError(rollbackEx,
@@ -196,8 +183,6 @@ public sealed class PostService : IPostService
 
     public async Task DeletePostAsync(Guid userId, Guid postId, bool isAdmin = false)
     {
-        // Cố ý KHÔNG lọc !IsDeleted ở đây — cần phân biệt "không tồn tại" (404)
-        // với "tồn tại nhưng đã xóa rồi" (400), AppDbContext không có global query filter.
         var post = await _postRepo.FirstOrDefaultAsync(p => p.Id == postId);
         if (post is null)
             throw new KeyNotFoundException($"Bài đăng {postId} không tồn tại.");
@@ -208,7 +193,7 @@ public sealed class PostService : IPostService
         if (post.IsDeleted)
             throw new InvalidOperationException("Bài viết đã được xóa trước đó.");
 
-        _postRepo.Remove(post); // soft-delete qua interceptor — KHÔNG xóa media trên cloud (giữ audit)
+        _postRepo.Remove(post);
         await _postRepo.SaveChangesAsync();
 
         if (isAdmin)
@@ -234,9 +219,18 @@ public sealed class PostService : IPostService
 
     public async Task<PagedResult<PostResponseDto>> GetFeedAsync(Guid userId, FeedQueryDto query)
     {
-        var friendIds = await _friendRepo.GetFriendIdsAsync(userId);
-        var blockedIds = await _friendRepo.GetBlockedUserIdsAsync(userId);
+        // Lấy song song 3 danh sách cần thiết để filter feed
+        var friendIdsTask = _friendRepo.GetFriendIdsAsync(userId);
+        var blockedIdsTask = _friendRepo.GetBlockedUserIdsAsync(userId);
+        var memberGroupIdsTask = _groupRepo.GetUserGroupIdsAsync(userId);
 
+        await Task.WhenAll(friendIdsTask, blockedIdsTask, memberGroupIdsTask);
+
+        var friendIds = (IReadOnlyCollection<Guid>)await friendIdsTask;
+        var blockedIds = (IReadOnlyCollection<Guid>)await blockedIdsTask;
+        var memberGroupIds = (IReadOnlyCollection<Guid>)await memberGroupIdsTask;
+
+        // Resolve cursor nếu có (infinite scroll)
         DateTime? cursorCreatedAt = null;
         if (query.CursorId.HasValue)
         {
@@ -244,27 +238,23 @@ public sealed class PostService : IPostService
             cursorCreatedAt = cursorPost?.CreatedAt;
         }
 
-        var pagedQuery = new PagedQuery { PageNumber = query.Page, PageSize = query.Size };
+        // ✅ Dùng GetFeedPostsAsync thay vì GetPagedAsync để có đầy đủ group privacy logic:
+        //   - Bài cá nhân: lọc theo Privacy + friends như cũ
+        //   - Bài public group (Approved): hiện cho tất cả
+        //   - Bài private group (Approved): chỉ hiện cho thành viên
+        //   - Bài Pending/Rejected: ẩn hoàn toàn khỏi feed
+        var (items, totalCount) = await _postRepo.GetFeedPostsAsync(
+            userId,
+            friendIds,
+            blockedIds,
+            memberGroupIds,
+            query.Page,
+            query.Size,
+            cursorCreatedAt);
 
-        var result = await _postRepo.GetPagedAsync(
-            pagedQuery,
-            predicate: p =>
-                p.DeletedAt == null &&
-                !blockedIds.Contains(p.UserId) &&
-                (cursorCreatedAt == null || p.CreatedAt < cursorCreatedAt) &&
-                (
-                    p.UserId == userId ||
-                    (friendIds.Contains(p.UserId) && p.Privacy != PostPrivacy.OnlyMe) ||
-                    (p.UserId != userId && !friendIds.Contains(p.UserId) && p.Privacy == PostPrivacy.Public)
-                ),
-            orderBy: p => p.CreatedAt,
-            ct: default,
-            // ✅ Thêm p.Group để BuildPostResponsesAsync có thể đọc GroupName
-            includes: [p => p.User, p => p.PostMediaFiles, p => p.Group!]);
+        var dtos = await BuildPostResponsesAsync(items, userId);
 
-        var dtos = await BuildPostResponsesAsync(result.Items, userId);
-
-        return PagedResult<PostResponseDto>.Create(dtos, result.TotalCount, result.PageNumber, result.PageSize);
+        return PagedResult<PostResponseDto>.Create(dtos, totalCount, query.Page, query.Size);
     }
 
     public async Task<PagedResult<PostResponseDto>> GetUserPostsAsync(
@@ -286,7 +276,6 @@ public sealed class PostService : IPostService
                 ),
             orderBy: p => p.CreatedAt,
             ct: default,
-            // ✅ Thêm p.Group để BuildPostResponsesAsync có thể đọc GroupName
             includes: [p => p.User, p => p.PostMediaFiles, p => p.Group!]);
 
         var dtos = await BuildPostResponsesAsync(result.Items, viewerId);
@@ -304,7 +293,6 @@ public sealed class PostService : IPostService
 
         var existingLike = await _likeRepo.GetByUserAndPostAsync(userId, postId);
 
-        // Unlike
         if (existingLike is not null)
         {
             _likeRepo.Remove(existingLike);
@@ -312,10 +300,6 @@ public sealed class PostService : IPostService
             return false;
         }
 
-        // Like — xử lý race condition khi double-click
-        // Nếu 2 request cùng lúc đều thấy existingLike = null và cùng AddAsync,
-        // PostgreSQL sẽ throw unique constraint violation cho request đến sau.
-        // Bắt lỗi này và xử lý graceful thay vì trả 500.
         try
         {
             await _likeRepo.AddAsync(new Like
@@ -331,7 +315,6 @@ public sealed class PostService : IPostService
             when (ex.InnerException is PostgresException pg
                   && pg.SqlState == PostgresErrorCodes.UniqueViolation)
         {
-            // Request đến sau trong race condition — like đã tồn tại, chuyển sang unlike
             _logger.LogWarning(
                 "ToggleLike race condition: like đã tồn tại (userId={UserId}, postId={PostId}). Chuyển sang unlike.",
                 userId, postId);
@@ -345,7 +328,6 @@ public sealed class PostService : IPostService
             return false;
         }
 
-        // Tạo notification (chỉ khi like thành công, không tự like)
         if (userId != post.UserId)
         {
             await CreateNotificationAsync(
@@ -368,7 +350,6 @@ public sealed class PostService : IPostService
 
         var pagedQuery = new PagedQuery { PageNumber = page, PageSize = size };
 
-        // Chỉ lấy comment gốc — reply hiển thị qua RepliesCount, client tự load thêm khi cần.
         var result = await _commentRepo.GetPagedAsync(
             pagedQuery,
             predicate: c => c.PostId == postId && c.DeletedAt == null && c.ParentCommentId == null,
@@ -378,7 +359,6 @@ public sealed class PostService : IPostService
 
         var commentIds = result.Items.Select(c => c.Id).ToList();
 
-        // Đếm reply trực tiếp cho toàn bộ comment gốc trong 1 query — tránh N+1.
         var replyCounts = (await _commentRepo.GetAsync(c =>
                 c.ParentCommentId != null &&
                 commentIds.Contains(c.ParentCommentId!.Value) &&
@@ -419,7 +399,6 @@ public sealed class PostService : IPostService
                 throw new ArgumentException("Bình luận gốc không thuộc bài đăng này.");
         }
 
-        // PurgoMalum: lọc từ ngữ tục tĩu trong comment
         var trimmedCommentContent = dto.Content.Trim();
         if (await _profanityFilter.ContainsProfanityAsync(trimmedCommentContent))
         {
@@ -438,8 +417,6 @@ public sealed class PostService : IPostService
         await _commentRepo.AddAsync(comment);
         await _commentRepo.SaveChangesAsync();
 
-        // Reply → notify tác giả comment gốc. Comment thường → notify tác giả bài viết.
-        // Bỏ qua nếu người nhận chính là người vừa comment (tự comment bài/reply của mình).
         var recipientId = parent?.UserId ?? post.UserId;
         if (recipientId != userId)
         {
@@ -457,7 +434,7 @@ public sealed class PostService : IPostService
             c => c.Id == comment.Id, default, c => c.User);
 
         var responseDto = _mapper.Map<CommentResponseDto>(savedComment);
-        responseDto.RepliesCount = 0; // vừa tạo, chưa thể có reply
+        responseDto.RepliesCount = 0;
         responseDto.IsOwner = true;
         return responseDto;
     }
@@ -485,10 +462,6 @@ public sealed class PostService : IPostService
         }
     }
 
-    /// <summary>
-    /// OnlyMe không đủ quyền → 404 (không lộ bài tồn tại). Friends không đủ quyền → 403.
-    /// Public / tác giả → luôn qua.
-    /// </summary>
     private async Task EnsureViewableAsync(Post post, Guid viewerId)
     {
         if (post.UserId == viewerId) return;
@@ -526,7 +499,6 @@ public sealed class PostService : IPostService
         var comments = await _commentRepo.GetAsync(c => postIds.Contains(c.PostId) && c.DeletedAt == null);
 
         var shareCounts = await _postRepo.GetShareCountsAsync(postIds);
-
         var sharedByMe = await _postRepo.GetSharedPostIdsByUserAsync(viewerId, postIds);
 
         var originalPostIds = posts
@@ -557,9 +529,8 @@ public sealed class PostService : IPostService
             dto.ShareCount = shareCounts.GetValueOrDefault(post.Id, 0);
             dto.IsSharedByMe = sharedByMe.Contains(post.Id);
 
-            // ✅ Gán GroupName từ navigation property Group (đã include ở GetFeedAsync / GetUserPostsAsync)
-            // GroupId đã được AutoMapper map tự động theo convention (Post.GroupId → dto.GroupId).
-            // GroupName không có trên entity nên phải set thủ công ở đây.
+            // GroupName không có trên entity nên set thủ công từ navigation property.
+            // Group đã được include trong GetFeedPostsAsync và GetUserPostsAsync.
             if (post.Group is not null)
             {
                 dto.GroupName = post.Group.Name;
@@ -692,8 +663,6 @@ public sealed class PostService : IPostService
             $"Loại file '{file.ContentType}' không được hỗ trợ (chỉ nhận ảnh/video/audio theo whitelist cấu hình).");
     }
 
-    // Giống hệt logic UserService.IsValidImageMagicBytes — có thể gom thành 1 helper dùng
-    // chung cho cả 2 service ở lần refactor sau, hiện giữ riêng để không đụng vào UserService.
     private bool IsValidImageMagicBytes(ReadOnlySpan<byte> header)
     {
         foreach (var hex in _fileValidation.ImageMagicBytes.Values)
@@ -710,48 +679,30 @@ public sealed class PostService : IPostService
 
     private static readonly byte[] WebmMagic = [0x1A, 0x45, 0xDF, 0xA3];
 
-    /// <summary>
-    /// Magic bytes cho video KHÔNG có trong appsettings (chỉ ImageMagicBytes được cấu hình) —
-    /// container video dùng offset khác 0 (vd "ftyp" nằm ở byte 4 của MP4/MOV) nên không hợp
-    /// với format Dictionary hex-prefix đơn giản của ảnh. Hardcode ở đây theo hiểu biết chuẩn
-    /// container, KHÔNG phải yêu cầu từ spec gốc.
-    /// </summary>
     private static bool IsValidVideoSignature(string contentType, ReadOnlySpan<byte> header)
     {
         return contentType switch
         {
-            // MP4 / MOV (QuickTime): box "ftyp" thường nằm ở offset 4, không phải offset 0
             "video/mp4" or "video/quicktime" =>
                 header.Length >= 8 && header[4..8].SequenceEqual("ftyp"u8),
-
-            // WebM (Matroska/EBML header)
             "video/webm" =>
                 header.Length >= 4 && header[..4].SequenceEqual(WebmMagic),
-
             _ => false
         };
     }
 
-    /// <summary>Tương tự IsValidVideoSignature — audio/aac chấp nhận qua Content-Type vì ADTS
-    /// raw stream không có magic bytes cố định đáng tin cậy.</summary>
     private static bool IsValidAudioSignature(string contentType, ReadOnlySpan<byte> header)
     {
         return contentType switch
         {
             "audio/ogg" => header.Length >= 4 && header[..4].SequenceEqual("OggS"u8),
-
             "audio/wav" => header.Length >= 12 &&
-                           header[..4].SequenceEqual("RIFF"u8) &&
-                           header[8..12].SequenceEqual("WAVE"u8),
-
-            // MP3: ID3v2 tag HOẶC frame sync (11 bit set liên tiếp: 0xFF Ex/Fx)
+                             header[..4].SequenceEqual("RIFF"u8) &&
+                             header[8..12].SequenceEqual("WAVE"u8),
             "audio/mpeg" => (header.Length >= 3 &&
-                             header[0] == (byte)'I' && header[1] == (byte)'D' && header[2] == (byte)'3') ||
-                            (header.Length >= 2 && header[0] == 0xFF && (header[1] & 0xE0) == 0xE0),
-
-            // AAC thô (ADTS) không có signature cố định đáng tin cậy — chấp nhận qua Content-Type
+                              header[0] == (byte)'I' && header[1] == (byte)'D' && header[2] == (byte)'3') ||
+                             (header.Length >= 2 && header[0] == 0xFF && (header[1] & 0xE0) == 0xE0),
             "audio/aac" => true,
-
             _ => false
         };
     }
@@ -764,7 +715,6 @@ public sealed class PostService : IPostService
         if (_fileValidation.AllowedVideoContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
             return (MediaType.Video, StorageProvider.R2);
 
-        // Còn lại đã được ValidatePostMedia đảm bảo là audio hợp lệ
         return (MediaType.Audio, StorageProvider.R2);
     }
 
