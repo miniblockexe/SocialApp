@@ -26,6 +26,7 @@ public sealed class UsersController : ControllerBase
 
     private const long AvatarMaxRequestBytes = 5 * 1024 * 1024;
     private const long CoverMaxRequestBytes = 10 * 1024 * 1024;
+    private const long RingtoneMaxRequestBytes = 5 * 1024 * 1024;
 
     public UsersController(
         IUserService userService,
@@ -272,6 +273,64 @@ public sealed class UsersController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ApiResponse<PagedResult<UserSearchResultDto>>.BadRequest(ex.Message));
+        }
+    }
+    [HttpPut("me/ringtone")]
+    [EnableRateLimiting("upload")]
+    [RequestSizeLimit(RingtoneMaxRequestBytes)]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status413PayloadTooLarge)]
+    public async Task<IActionResult> UpdateRingtone([FromForm] FileUploadRequest request)
+    {
+        if (request.File is null)
+            return BadRequest(ApiResponse<string>.BadRequest("File nhạc chuông không được để trống."));
+
+        var userId = User.GetUserIdOrThrow();
+
+        try
+        {
+            var url = await _userService.UpdateRingtoneAsync(userId, request.File);
+
+            _logger.LogInformation(
+                "[PUT /api/users/me/ringtone] Upload thành công — UserId: {UserId}", userId);
+
+            return Ok(ApiResponse<string>.Ok(url, "Cập nhật nhạc chuông thành công."));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse<string>.NotFound(ex.Message));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ApiResponse<string>.BadRequest(ex.Message));
+        }
+    }
+
+    /// <summary>Xóa nhạc chuông tuỳ chỉnh — khôi phục về nhạc chuông mặc định.</summary>
+    [HttpDelete("me/ringtone")]
+    [EnableRateLimiting("default")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteRingtone()
+    {
+        var userId = User.GetUserIdOrThrow();
+
+        try
+        {
+            await _userService.DeleteRingtoneAsync(userId);
+
+            _logger.LogInformation(
+                "[DELETE /api/users/me/ringtone] Xóa thành công — UserId: {UserId}", userId);
+
+            return Ok(ApiResponse.Ok("Đã xóa nhạc chuông tuỳ chỉnh."));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse.NotFound(ex.Message));
         }
     }
 }

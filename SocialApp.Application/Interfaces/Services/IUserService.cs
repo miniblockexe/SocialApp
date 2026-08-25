@@ -83,4 +83,6 @@ public interface IUserService
     /// <returns>UserBriefDto.</returns>
     /// <exception cref="KeyNotFoundException">404 — userId không tồn tại.</exception>
     Task<UserBriefDto> GetUserBriefAsync(Guid userId);
+    Task<string> UpdateRingtoneAsync(Guid userId, IFormFile file);
+    Task DeleteRingtoneAsync(Guid userId);
 }

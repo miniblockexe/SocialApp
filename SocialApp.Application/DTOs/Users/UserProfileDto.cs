@@ -13,6 +13,8 @@ public sealed class UserProfileDto
     public string? Bio { get; init; }
     public string? AvatarUrl { get; init; }
     public string? CoverPhotoUrl { get; init; }
+    /// <summary>URL nhạc chuông tuỳ chỉnh (R2). Null = dùng nhạc chuông mặc định.</summary>
+    public string? RingtoneUrl { get; init; }
 
     /// <summary>Thời điểm tạo tài khoản (UTC).</summary>
     public DateTime CreatedAt { get; init; }

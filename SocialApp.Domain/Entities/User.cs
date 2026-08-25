@@ -79,4 +79,9 @@ public class User : BaseAuditableEntity
 
     /// <summary>Refresh token của user.</summary>
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+    /// <summary>URL public của file nhạc chuông tuỳ chỉnh (R2).</summary>
+    public string? RingtoneUrl { get; set; }
+
+    /// <summary>Object key trên R2 — dùng để xóa file cũ khi upload mới.</summary>
+    public string? RingtoneKey { get; set; }
 }

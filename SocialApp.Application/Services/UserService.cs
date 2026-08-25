@@ -24,15 +24,18 @@ public sealed class UserService : IUserService
     private readonly IMapper _mapper;
     private readonly ILogger<UserService> _logger;
     private readonly FileValidationSettings _fileValidation;
+    private readonly IR2Service _r2Service;
 
     private const long AvatarMaxBytes = 5 * 1024 * 1024;
     private const long CoverMaxBytes = 10 * 1024 * 1024;
+    private const long RingtoneMaxBytes = 5 * 1024 * 1024; // 5 MB
 
     public UserService(
         IUserRepository userRepo,
         IFriendRequestRepository friendRepo,
         IGenericRepository<Post> postRepo,
         ICloudService cloudService,
+        IR2Service r2Service,
         IMapper mapper,
         ILogger<UserService> logger,
         IOptions<FileValidationSettings> fileValidationOptions)
@@ -44,6 +47,7 @@ public sealed class UserService : IUserService
         _mapper = mapper;
         _logger = logger;
         _fileValidation = fileValidationOptions.Value;
+        _r2Service = r2Service;
     }
 
     public async Task<UserProfileDto> GetProfileAsync(Guid targetId, Guid viewerId)
@@ -263,5 +267,56 @@ public sealed class UserService : IUserService
                 return true;
         }
         return false;
+    }
+    public async Task<string> UpdateRingtoneAsync(Guid userId, IFormFile file)
+    {
+        if (file is null || file.Length == 0)
+            throw new ArgumentException("File nhạc chuông không được để trống.");
+
+        var contentType = file.ContentType?.ToLowerInvariant() ?? string.Empty;
+        string[] allowed = ["audio/mpeg", "audio/ogg", "audio/wav", "audio/mp4", "audio/x-m4a"];
+        if (!allowed.Contains(contentType))
+            throw new ArgumentException("Chỉ chấp nhận file audio: mp3, ogg, wav, m4a.");
+
+        if (file.Length > RingtoneMaxBytes)
+            throw new ArgumentException("File nhạc chuông không được vượt quá 5MB.");
+
+        var user = await _userRepo.GetByIdAsync(userId)
+            ?? throw new KeyNotFoundException($"Không tìm thấy user {userId}.");
+
+        if (!string.IsNullOrWhiteSpace(user.RingtoneKey))
+            _ = _r2Service.DeleteAsync(user.RingtoneKey);
+
+        var result = await _r2Service.UploadAsync(file, "ringtones");
+
+        user.RingtoneUrl = result.SecureUrl;
+        user.RingtoneKey = result.PublicId;
+        _userRepo.Update(user);
+        await _userRepo.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "[UserService] Ringtone updated — UserId: {Id}, Key: {Key}",
+            userId, result.PublicId);
+
+        return result.SecureUrl;
+    }
+
+    public async Task DeleteRingtoneAsync(Guid userId)
+    {
+        var user = await _userRepo.GetByIdAsync(userId)
+            ?? throw new KeyNotFoundException($"Không tìm thấy user {userId}.");
+
+        if (string.IsNullOrWhiteSpace(user.RingtoneKey))
+            return; // no-op
+
+        await _r2Service.DeleteAsync(user.RingtoneKey);
+
+        user.RingtoneUrl = null;
+        user.RingtoneKey = null;
+        _userRepo.Update(user);
+        await _userRepo.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "[UserService] Ringtone deleted — UserId: {Id}", userId);
     }
 }
