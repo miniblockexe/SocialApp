@@ -1,4 +1,5 @@
-﻿using SocialApp.Domain.Entities;
+﻿using SocialApp.Application.Common;
+using SocialApp.Domain.Entities;
 
 namespace SocialApp.Application.Interfaces.Repositories;
 
@@ -35,4 +36,30 @@ public interface IPostRepository : IGenericRepository<Post>
     /// </summary>
     Task<IReadOnlyList<Post>> GetOriginalPostsAsync(
         IEnumerable<Guid> postIds, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lấy feed chính với đầy đủ group logic — thay thế GetPagedAsync trong GetFeedAsync.
+    /// Áp dụng các rule:
+    ///   - Bài cá nhân (GroupId == null): hiện theo Privacy + friendIds như cũ.
+    ///   - Bài trong Public group (GroupPostStatus == Approved): hiện cho tất cả.
+    ///   - Bài trong Private group (GroupPostStatus == Approved): chỉ hiện nếu viewer là thành viên.
+    ///   - Bài Pending/Rejected: không hiện trên feed dù là bất kỳ ai.
+    /// </summary>
+    /// <param name="userId">Viewer hiện tại.</param>
+    /// <param name="friendIds">Danh sách bạn bè của viewer (để lọc Privacy.Friends).</param>
+    /// <param name="blockedIds">Danh sách user bị block (ẩn bài của họ).</param>
+    /// <param name="memberGroupIds">Danh sách groupId mà viewer đã là thành viên.</param>
+    /// <param name="page">Trang (1-based).</param>
+    /// <param name="size">Số item mỗi trang.</param>
+    /// <param name="cursorCreatedAt">Cursor timestamp để infinite scroll (null = trang đầu).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<(IReadOnlyList<Post> Items, int TotalCount)> GetFeedPostsAsync(
+        Guid userId,
+        IReadOnlyCollection<Guid> friendIds,
+        IReadOnlyCollection<Guid> blockedIds,
+        IReadOnlyCollection<Guid> memberGroupIds,
+        int page,
+        int size,
+        DateTime? cursorCreatedAt,
+        CancellationToken ct = default);
 }
