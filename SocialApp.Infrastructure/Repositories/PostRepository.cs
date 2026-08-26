@@ -88,7 +88,8 @@ public sealed class PostRepository : GenericRepository<Post>, IPostRepository
         DateTime? cursorCreatedAt,
         CancellationToken ct = default)
     {
-        // ── Base: bài chưa xóa, không bị block, cursor ──────────────────
+        var memberGroupIdSet = memberGroupIds.Select(id => (Guid?)id).ToHashSet();
+
         var query = _ctx.Posts
             .AsNoTracking()
             .Where(p =>
@@ -96,44 +97,31 @@ public sealed class PostRepository : GenericRepository<Post>, IPostRepository
                 !blockedIds.Contains(p.UserId) &&
                 (cursorCreatedAt == null || p.CreatedAt < cursorCreatedAt));
 
-        // ── Filter theo 2 nhánh: bài cá nhân vs bài nhóm ────────────────
-        //
-        // Nhánh 1 — Bài cá nhân (GroupId == null):
-        //   Hiện theo Privacy + friendship như feed cũ.
-        //
-        // Nhánh 2 — Bài trong nhóm (GroupId != null):
-        //   BẮT BUỘC có GroupPost và Status == Approved (Pending/Rejected ẩn hoàn toàn).
-        //   Public group  → tất cả đều xem được.
-        //   Private group → chỉ thành viên (memberGroupIds) xem được.
         query = query.Where(p =>
 
-            // ── Nhánh 1: bài cá nhân ─────────────────────────────────────
             (p.GroupId == null &&
              (
-                 // Tác giả luôn xem được bài của mình
                  p.UserId == userId ||
-                 // Bạn bè xem được bài Privacy != OnlyMe
                  (friendIds.Contains(p.UserId) && p.Privacy != PostPrivacy.OnlyMe) ||
-                 // Người lạ chỉ xem được bài Public
                  (p.UserId != userId && !friendIds.Contains(p.UserId) && p.Privacy == PostPrivacy.Public)
              ))
 
             ||
 
-            // ── Nhánh 2: bài trong nhóm ──────────────────────────────────
             (p.GroupId != null &&
-             // Chỉ lấy bài đã được duyệt — Pending/Rejected ẩn khỏi feed
-             p.GroupPost != null &&
-             p.GroupPost.Status == GroupPostStatus.Approved &&
+             _ctx.GroupPosts.Any(gp =>
+                 gp.PostId == p.Id &&
+                 gp.Status == GroupPostStatus.Approved) &&
+
              (
-                 // Public group: ai cũng xem được
-                 p.Group!.Privacy == GroupPrivacy.Public ||
-                 // Private group: chỉ thành viên xem được
-                 (p.Group.Privacy == GroupPrivacy.Private && memberGroupIds.Contains(p.GroupId.Value))
+                 _ctx.Groups.Any(g =>
+                     g.Id == p.GroupId &&
+                     g.Privacy == GroupPrivacy.Public) ||
+
+                 memberGroupIdSet.Contains(p.GroupId)
              ))
         );
 
-        // COUNT trước skip/take để tính TotalCount cho phân trang
         var totalCount = await query.CountAsync(ct);
 
         var items = await query
