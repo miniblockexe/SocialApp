@@ -4,6 +4,7 @@ using SocialApp.API.Hubs;
 using SocialApp.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Features;
 
 // BUILDER
 var builder = WebApplication.CreateBuilder(args);
@@ -13,6 +14,18 @@ builder.Configuration
 
 var config = builder.Configuration;
 var env = builder.Environment;
+
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.Limits.MaxRequestBodySize = 15L * 1024 * 1024; // 15 MB
+});
+
+builder.Services.Configure<FormOptions>(opt =>
+{
+    opt.MultipartBodyLengthLimit = 15L * 1024 * 1024; // 15 MB
+    opt.ValueLengthLimit = 4 * 1024 * 1024;   // 4 MB 
+    opt.KeyLengthLimit = 2048;
+});
 
 // Controllers + JSON
 builder.Services
