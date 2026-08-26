@@ -219,16 +219,9 @@ public sealed class PostService : IPostService
 
     public async Task<PagedResult<PostResponseDto>> GetFeedAsync(Guid userId, FeedQueryDto query)
     {
-        // Lấy song song 3 danh sách cần thiết để filter feed
-        var friendIdsTask = _friendRepo.GetFriendIdsAsync(userId);
-        var blockedIdsTask = _friendRepo.GetBlockedUserIdsAsync(userId);
-        var memberGroupIdsTask = _groupRepo.GetUserGroupIdsAsync(userId);
-
-        await Task.WhenAll(friendIdsTask, blockedIdsTask, memberGroupIdsTask);
-
-        var friendIds = (IReadOnlyCollection<Guid>)await friendIdsTask;
-        var blockedIds = (IReadOnlyCollection<Guid>)await blockedIdsTask;
-        var memberGroupIds = (IReadOnlyCollection<Guid>)await memberGroupIdsTask;
+        var friendIds = (IReadOnlyCollection<Guid>)await _friendRepo.GetFriendIdsAsync(userId);
+        var blockedIds = (IReadOnlyCollection<Guid>)await _friendRepo.GetBlockedUserIdsAsync(userId);
+        var memberGroupIds = (IReadOnlyCollection<Guid>)await _groupRepo.GetUserGroupIdsAsync(userId);
 
         // Resolve cursor nếu có (infinite scroll)
         DateTime? cursorCreatedAt = null;
