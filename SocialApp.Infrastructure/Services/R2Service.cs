@@ -21,7 +21,7 @@ public sealed class R2Service : IR2Service
     [
         "image/jpeg", "image/png", "image/gif", "image/webp",
         "video/mp4", "video/webm", "video/quicktime",
-        "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4"
+        "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/x-m4a"
     ];
 
     private const long MaxFileSizeBytes = 500L * 1024 * 1024; // 500 MB
