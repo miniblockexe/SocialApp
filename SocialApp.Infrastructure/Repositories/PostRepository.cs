@@ -109,6 +109,7 @@ public sealed class PostRepository : GenericRepository<Post>, IPostRepository
             ||
 
             (p.GroupId != null &&
+
              _ctx.GroupPosts.Any(gp =>
                  gp.PostId == p.Id &&
                  gp.Status == GroupPostStatus.Approved) &&
