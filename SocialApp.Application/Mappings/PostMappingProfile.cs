@@ -13,7 +13,6 @@ public sealed class PostMappingProfile : Profile
 {
     public PostMappingProfile()
     {
-        // Post → PostResponseDto
         // Id, Content, Privacy, CreatedAt, UpdatedAt map theo convention.
         // Author lấy từ Post.User (dùng lại mapping User → UserBriefDto đã cấu hình ở AuthMappingProfile
         // — AutoMapper gộp mọi profile trong assembly vào 1 config nên tái dùng được).
@@ -21,7 +20,8 @@ public sealed class PostMappingProfile : Profile
         // LikeCount, CommentCount, IsLikedByMe, IsOwner, ShareCount, IsSharedByMe, OriginalPost
         // không tồn tại trên Post entity — PostService tính thủ công sau khi map, nên ignore ở đây.
         // GroupId map trực tiếp theo convention (Post.GroupId → PostResponseDto.GroupId).
-        // GroupName không tồn tại trên Post entity (lấy từ Post.Group?.Name) — ignore, service tự set.
+        // GroupName, GroupAvatarUrl không tồn tại trên Post entity (lấy từ Post.Group?.Name /
+        // Post.Group?.AvatarUrl) — ignore, service tự set.
         CreateMap<Post, PostResponseDto>()
             .ForMember(dest => dest.Author, opt => opt.MapFrom(src => src.User))
             .ForMember(dest => dest.MediaFiles, opt => opt.MapFrom(src => src.PostMediaFiles))
@@ -32,13 +32,13 @@ public sealed class PostMappingProfile : Profile
             .ForMember(dest => dest.ShareCount, opt => opt.Ignore())
             .ForMember(dest => dest.IsSharedByMe, opt => opt.Ignore())
             .ForMember(dest => dest.OriginalPost, opt => opt.Ignore())
-            .ForMember(dest => dest.GroupName, opt => opt.Ignore()); // service tự set từ Post.Group?.Name
+            .ForMember(dest => dest.GroupName, opt => opt.Ignore())       // service tự set từ Post.Group?.Name
+            .ForMember(dest => dest.GroupAvatarUrl, opt => opt.Ignore()); // service tự set từ Post.Group?.AvatarUrl
 
         // PostMediaFile → PostMediaDto
         // Id, MediaUrl, MediaType, StorageProvider, FileSize khớp tên hoàn toàn — không cần ForMember.
         CreateMap<PostMediaFile, PostMediaDto>();
 
-        // Comment → CommentResponseDto
         // Id, Content, CreatedAt, UpdatedAt, ParentCommentId map theo convention.
         // Author lấy từ Comment.User. RepliesCount, IsOwner ignore — PostService tính thủ công.
         CreateMap<Comment, CommentResponseDto>()

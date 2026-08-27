@@ -55,4 +55,7 @@ public sealed class PostResponseDto
 
     /// <summary>Tên nhóm nếu bài đăng trong nhóm. Null = bài đăng cá nhân.</summary>
     public string? GroupName { get; set; }
+
+    /// <summary>Ảnh đại diện nhóm nếu bài đăng trong nhóm. Null = bài đăng cá nhân.</summary>
+    public string? GroupAvatarUrl { get; set; }
 }

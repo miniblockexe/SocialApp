@@ -29,7 +29,6 @@ public sealed class PostService : IPostService
     private readonly ILikeRepository _likeRepo;
     private readonly INotificationRepository _notificationRepo;
     private readonly IFriendRequestRepository _friendRepo;
-    // ✅ Inject IGroupRepository để lấy danh sách nhóm viewer đã tham gia (dùng trong GetFeedAsync)
     private readonly IGroupRepository _groupRepo;
     private readonly ICloudService _cloudService;
     private readonly IMapper _mapper;
@@ -150,7 +149,7 @@ public sealed class PostService : IPostService
         }
 
         var savedPost = await _postRepo.FirstOrDefaultAsync(
-            p => p.Id == post.Id, default, p => p.User, p => p.PostMediaFiles);
+            p => p.Id == post.Id, default, p => p.User, p => p.PostMediaFiles, p => p.Group!);
 
         return await BuildPostResponseAsync(savedPost!, userId);
     }
@@ -176,7 +175,7 @@ public sealed class PostService : IPostService
         await _postRepo.SaveChangesAsync();
 
         var savedPost = await _postRepo.FirstOrDefaultAsync(
-            p => p.Id == postId, default, p => p.User, p => p.PostMediaFiles);
+            p => p.Id == postId, default, p => p.User, p => p.PostMediaFiles, p => p.Group!);
 
         return await BuildPostResponseAsync(savedPost!, userId);
     }
@@ -207,7 +206,9 @@ public sealed class PostService : IPostService
     public async Task<PostResponseDto> GetPostByIdAsync(Guid postId, Guid viewerId)
     {
         var post = await _postRepo.FirstOrDefaultAsync(
-            p => p.Id == postId && p.DeletedAt == null, default, p => p.User, p => p.PostMediaFiles);
+            p => p.Id == postId && p.DeletedAt == null,
+            default,
+            p => p.User, p => p.PostMediaFiles, p => p.Group!);
 
         if (post is null)
             throw new KeyNotFoundException($"Bài đăng {postId} không tồn tại.");
@@ -522,11 +523,12 @@ public sealed class PostService : IPostService
             dto.ShareCount = shareCounts.GetValueOrDefault(post.Id, 0);
             dto.IsSharedByMe = sharedByMe.Contains(post.Id);
 
-            // GroupName không có trên entity nên set thủ công từ navigation property.
-            // Group đã được include trong GetFeedPostsAsync và GetUserPostsAsync.
+            // GroupName, GroupAvatarUrl không có trên entity nên set thủ công từ navigation property.
+            // Group đã được include trong tất cả các query trả về PostResponseDto.
             if (post.Group is not null)
             {
                 dto.GroupName = post.Group.Name;
+                dto.GroupAvatarUrl = post.Group.AvatarUrl;
             }
 
             if (post.OriginalPostId.HasValue &&
@@ -594,7 +596,7 @@ public sealed class PostService : IPostService
         }
 
         var savedShare = await _postRepo.FirstOrDefaultAsync(
-            p => p.Id == sharePost.Id, default, p => p.User, p => p.PostMediaFiles);
+            p => p.Id == sharePost.Id, default, p => p.User, p => p.PostMediaFiles, p => p.Group!);
 
         var responseList = await BuildPostResponsesAsync([savedShare!], userId);
         return responseList[0];
