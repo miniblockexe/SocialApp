@@ -268,15 +268,62 @@ public sealed class UserService : IUserService
         }
         return false;
     }
+    /// <summary>
+    /// Kiểm tra magic bytes để xác định đây thực sự là file audio.
+    /// Cần thiết vì mobile browser hay gửi Content-Type sai.
+    /// </summary>
+    private static bool IsValidAudioMagicBytes(byte[] header, int length)
+    {
+        if (length < 4) return false;
+
+        // MP3: ID3 tag hoặc MPEG frame sync
+        if (header[0] == 0x49 && header[1] == 0x44 && header[2] == 0x33) return true; // ID3
+        if (header[0] == 0xFF && (header[1] & 0xE0) == 0xE0) return true;             // MPEG
+
+        // WAV: RIFF....WAVE
+        if (length >= 12 &&
+            header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46 &&
+            header[8] == 0x57 && header[9] == 0x41 && header[10] == 0x56 && header[11] == 0x45)
+            return true;
+
+        // OGG: OggS
+        if (header[0] == 0x4F && header[1] == 0x67 && header[2] == 0x67 && header[3] == 0x53) return true;
+
+        // M4A / MP4: ftyp box
+        if (length >= 8 &&
+            header[4] == 0x66 && header[5] == 0x74 && header[6] == 0x79 && header[7] == 0x70)
+            return true;
+
+        // FLAC
+        if (header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43) return true;
+
+        return false;
+    }
+
     public async Task<string> UpdateRingtoneAsync(Guid userId, IFormFile file)
     {
         if (file is null || file.Length == 0)
             throw new ArgumentException("File nhạc chuông không được để trống.");
 
         var contentType = file.ContentType?.ToLowerInvariant() ?? string.Empty;
-        string[] allowed = ["audio/mpeg", "audio/ogg", "audio/wav", "audio/mp4", "audio/x-m4a"];
-        if (!allowed.Contains(contentType))
+
+        string[] allowedAudio =
+        [
+            "audio/mpeg", "audio/mp3",
+            "audio/ogg",
+            "audio/wav", "audio/wave", "audio/x-wav", "audio/vnd.wave",
+            "audio/mp4", "audio/x-m4a", "audio/aac",
+            "application/octet-stream", 
+        ];
+        if (!allowedAudio.Any(a => contentType.StartsWith(a, StringComparison.Ordinal)))
             throw new ArgumentException("Chỉ chấp nhận file audio: mp3, ogg, wav, m4a.");
+
+        // Verify magic bytes — đảm bảo đúng là audio dù ContentType có sai
+        using var peekStream = file.OpenReadStream();
+        var magicBuf = new byte[12];
+        var magicRead = peekStream.Read(magicBuf, 0, magicBuf.Length);
+        if (!IsValidAudioMagicBytes(magicBuf, magicRead))
+            throw new ArgumentException("File không phải audio hợp lệ.");
 
         if (file.Length > RingtoneMaxBytes)
             throw new ArgumentException("File nhạc chuông không được vượt quá 5MB.");
