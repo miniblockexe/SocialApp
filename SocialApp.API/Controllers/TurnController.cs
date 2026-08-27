@@ -56,10 +56,12 @@ public sealed class TurnController : ControllerBase
             var json = await response.Content.ReadAsStringAsync();
             var data = JsonSerializer.Deserialize<JsonElement>(json);
 
-            return Ok(new
-            {
-                iceServers = data.GetProperty("iceServers")
-            });
+            var iceServersEl = data.GetProperty("iceServers");
+            var iceServersArray = iceServersEl.ValueKind == JsonValueKind.Array
+                ? iceServersEl
+                : JsonSerializer.Deserialize<JsonElement>($"[{iceServersEl.GetRawText()}]");
+
+            return Ok(new { iceServers = iceServersArray });
         }
         catch (Exception ex)
         {
