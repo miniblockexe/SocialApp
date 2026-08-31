@@ -7,15 +7,13 @@ using SocialApp.Domain.Enums;
 
 namespace SocialApp.Infrastructure.Data;
 
-// AppDbContext
-
 public class AppDbContext : DbContext, IMessageDbContext, IAdminDbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-    // DbSet
     public DbSet<User> Users => Set<User>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Post> Posts => Set<Post>();
     public DbSet<PostMediaFile> PostMediaFiles => Set<PostMediaFile>();
     public DbSet<Like> Likes => Set<Like>();
@@ -82,7 +80,6 @@ public class AppDbContext : DbContext, IMessageDbContext, IAdminDbContext
             }
         }
 
-        // Set UpdatedAt cho FriendRequest (không kế thừa BaseAuditableEntity)
         foreach (var entry in ChangeTracker.Entries<FriendRequest>())
         {
             if (entry.State == EntityState.Modified)
@@ -96,7 +93,27 @@ public class AppDbContext : DbContext, IMessageDbContext, IAdminDbContext
     }
 }
 
-// Entity Configurations
+// ── Entity Configurations ─────────────────────────────────────────────────────
+
+internal sealed class PasswordResetTokenConfiguration : IEntityTypeConfiguration<PasswordResetToken>
+{
+    public void Configure(EntityTypeBuilder<PasswordResetToken> builder)
+    {
+        builder.ToTable("PasswordResetTokens");
+        builder.HasKey(t => t.Id);
+
+        builder.Property(t => t.Token).IsRequired().HasMaxLength(6);
+        builder.Property(t => t.IsUsed).HasDefaultValue(false);
+
+        builder.HasOne(t => t.User)
+            .WithMany()
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(t => new { t.UserId, t.Token })
+            .HasDatabaseName("IX_PasswordResetTokens_UserId_Token");
+    }
+}
 
 internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 {
@@ -129,8 +146,6 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasMany(u => u.Notifications).WithOne(n => n.User).HasForeignKey(n => n.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(u => u.RefreshTokens).WithOne(rt => rt.User).HasForeignKey(rt => rt.UserId).OnDelete(DeleteBehavior.Cascade);
 
-        // Seed — Guid cố định để migration idempotent
-        // Hash của "Admin@123456" workFactor=12. Re-gen: BCrypt.Net.BCrypt.HashPassword("Admin@123456", 12)
         builder.HasData(new User
         {
             Id = new Guid("00000000-0000-0000-0000-000000000001"),
@@ -145,7 +160,6 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
             UpdatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
         });
 
-        // Seed — AI bot user cho GeminiService (SenderId = AiBotUserId)
         builder.HasData(new User
         {
             Id = new Guid("00000000-0000-0000-0000-000000000002"),
@@ -171,7 +185,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
 
         builder.Property(rt => rt.Token).IsRequired().HasMaxLength(512);
         builder.Property(rt => rt.IsRevoked).HasDefaultValue(false);
-        builder.Ignore(rt => rt.IsActive); // computed property
+        builder.Ignore(rt => rt.IsActive);
 
         builder.HasIndex(rt => rt.Token).IsUnique().HasDatabaseName("IX_RefreshTokens_Token");
         builder.HasIndex(rt => new { rt.UserId, rt.IsRevoked }).HasDatabaseName("IX_RefreshTokens_UserId_IsRevoked");
@@ -203,7 +217,6 @@ internal sealed class PostConfiguration : IEntityTypeConfiguration<Post>
                .OnDelete(DeleteBehavior.SetNull);
         builder.HasIndex(p => p.OriginalPostId).HasDatabaseName("IX_Posts_OriginalPostId");
 
-        // Group relationship
         builder.Property(p => p.GroupId).IsRequired(false);
         builder.HasIndex(p => p.GroupId).HasDatabaseName("IX_Posts_GroupId");
         builder.HasOne(p => p.Group)
@@ -331,8 +344,7 @@ internal sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
                .IsRequired(false)
                .OnDelete(DeleteBehavior.SetNull);
 
-        builder.HasIndex(m => m.SharedPostId)
-               .HasDatabaseName("IX_Messages_SharedPostId");
+        builder.HasIndex(m => m.SharedPostId).HasDatabaseName("IX_Messages_SharedPostId");
     }
 }
 
@@ -361,7 +373,7 @@ internal sealed class NotificationConfiguration : IEntityTypeConfiguration<Notif
 
         builder.HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt })
             .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedAt")
-            .IsDescending(false, false, true); // CreatedAt DESC
+            .IsDescending(false, false, true);
 
         builder.HasOne(n => n.User).WithMany(u => u.Notifications).HasForeignKey(n => n.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(n => n.Actor).WithMany().HasForeignKey(n => n.ActorId).OnDelete(DeleteBehavior.Restrict);

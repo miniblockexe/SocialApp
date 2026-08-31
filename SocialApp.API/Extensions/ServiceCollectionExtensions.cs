@@ -26,14 +26,8 @@ using IAdminDbContextAlias = SocialApp.Application.Interfaces.Repositories.IAdmi
 
 namespace SocialApp.API.Extensions;
 
-/// <summary>
-/// Tập hợp extension methods đăng ký DI cho toàn bộ ứng dụng.
-/// Gọi từ Program.cs — mỗi nhóm là 1 method riêng biệt để dễ kiểm soát.
-/// </summary>
 public static class ServiceCollectionExtensions
 {
-    // Database — EF Core + PostgreSQL
-
     public static IServiceCollection AddDatabase(
         this IServiceCollection services,
         IConfiguration config)
@@ -53,7 +47,6 @@ public static class ServiceCollectionExtensions
                     npgsql.MigrationsAssembly("SocialApp.Infrastructure");
                 });
 
-            // Development: log SQL query ra console
             if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
             {
                 options.EnableSensitiveDataLogging();
@@ -63,8 +56,6 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
-
-    // JWT Authentication + Authorization
 
     public static IServiceCollection AddJwtAuthentication(
         this IServiceCollection services,
@@ -96,10 +87,9 @@ public static class ServiceCollectionExtensions
                     ValidIssuer = jwtSection["Issuer"],
                     ValidAudience = jwtSection["Audience"],
                     IssuerSigningKey = key,
-                    ClockSkew = TimeSpan.Zero // không cho phép trễ, access token 15 phút là chính xác
+                    ClockSkew = TimeSpan.Zero
                 };
 
-                // SignalR cần đọc token từ query string (do browser không set Authorization header cho WebSocket)
                 options.Events = new JwtBearerEvents
                 {
                     OnMessageReceived = ctx =>
@@ -124,8 +114,6 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // CORS
-
     public static IServiceCollection AddApplicationCors(
         this IServiceCollection services,
         IConfiguration config)
@@ -142,14 +130,12 @@ public static class ServiceCollectionExtensions
                     .WithOrigins(allowedOrigins)
                     .AllowAnyMethod()
                     .AllowAnyHeader()
-                    .AllowCredentials(); // cần cho SignalR + cookie auth
+                    .AllowCredentials();
             });
         });
 
         return services;
     }
-
-    // Rate Limiting — per policy, per IP hoặc per user
 
     public static IServiceCollection AddApplicationRateLimiting(
         this IServiceCollection services,
@@ -159,7 +145,6 @@ public static class ServiceCollectionExtensions
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            // Login: 5 lần / 15 phút per IP
             options.AddFixedWindowLimiter("login", o =>
             {
                 o.PermitLimit = config.GetValue("RateLimitSettings:Login:PermitLimit", 5);
@@ -168,7 +153,6 @@ public static class ServiceCollectionExtensions
                 o.QueueLimit = 0;
             });
 
-            // Register: 3 lần / giờ per IP
             options.AddFixedWindowLimiter("register", o =>
             {
                 o.PermitLimit = config.GetValue("RateLimitSettings:Register:PermitLimit", 3);
@@ -176,7 +160,6 @@ public static class ServiceCollectionExtensions
                 o.QueueLimit = 0;
             });
 
-            // Upload: 20 lần / phút per user
             options.AddFixedWindowLimiter("upload", o =>
             {
                 o.PermitLimit = config.GetValue("RateLimitSettings:Upload:PermitLimit", 20);
@@ -184,7 +167,6 @@ public static class ServiceCollectionExtensions
                 o.QueueLimit = 0;
             });
 
-            // Gemini AI: 10 lần / phút per user
             options.AddFixedWindowLimiter("gemini", o =>
             {
                 o.PermitLimit = config.GetValue("RateLimitSettings:GeminiAI:PermitLimit", 10);
@@ -192,7 +174,6 @@ public static class ServiceCollectionExtensions
                 o.QueueLimit = 0;
             });
 
-            // Default: 100 lần / phút per user
             options.AddFixedWindowLimiter("default", o =>
             {
                 o.PermitLimit = config.GetValue("RateLimitSettings:Default:PermitLimit", 100);
@@ -203,8 +184,6 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
-
-    // SignalR
 
     public static IServiceCollection AddApplicationSignalR(
         this IServiceCollection services,
@@ -230,13 +209,10 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // Cloud Storage — Cloudinary + Cloudflare R2
-
     public static IServiceCollection AddCloudStorage(
       this IServiceCollection services,
       IConfiguration config)
     {
-        // Cloudinary
         var cloudinarySection = config.GetSection("CloudinarySettings");
         var cloudinary = new Cloudinary(new Account(
             cloudinarySection["CloudName"]
@@ -249,10 +225,6 @@ public static class ServiceCollectionExtensions
         cloudinary.Api.Secure = true;
         services.AddSingleton(cloudinary);
 
-        // Cloudflare R2 — khởi tạo trong R2Service constructor (inject IOptions)
-        // Không cần tạo AmazonS3Client ở đây nữa vì R2Service tự new trong constructor
-
-        // HttpClient cho CloudinaryService.GetUsageMBAsync
         services.AddHttpClient("Cloudinary", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);
@@ -263,8 +235,6 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
-
-    // Gemini AI — IHttpClientFactory
 
     public static IServiceCollection AddGeminiAI(
         this IServiceCollection services,
@@ -284,8 +254,6 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // IOptions<T> — strongly-typed config
-
     public static IServiceCollection AddApplicationOptions(
         this IServiceCollection services,
         IConfiguration config)
@@ -298,29 +266,26 @@ public static class ServiceCollectionExtensions
         services.Configure<ApplicationFileValidationSettings>(config.GetSection("FileValidationSettings"));
         services.Configure<PaginationSettings>(config.GetSection("PaginationSettings"));
 
-        // External API settings
         services.Configure<SocialApp.Application.Settings.MailboxlayerSettings>(config.GetSection("MailboxlayerSettings"));
         services.Configure<SocialApp.Application.Settings.TinyUrlSettings>(config.GetSection("TinyUrlSettings"));
         services.Configure<SocialApp.Application.Settings.TenorSettings>(config.GetSection("TenorSettings"));
 
+        // ── MỚI: Gmail + Google OAuth settings ───────────────────────────────
+        services.Configure<GmailSettings>(config.GetSection("GmailSettings"));
+        services.Configure<GoogleSettings>(config.GetSection("GoogleSettings"));
+
         return services;
     }
 
-    // Repositories + Services — Application layer DI
-
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
-        // Cache (dùng cho BannedUserMiddleware và các service khác)
         services.AddMemoryCache();
 
-        // AutoMapper — scan profiles từ Application assembly
         services.AddAutoMapper(typeof(SocialApp.Application.AssemblyMarker).Assembly);
 
-        // FluentValidation
         services.AddValidatorsFromAssembly(
             typeof(SocialApp.Application.AssemblyMarker).Assembly);
 
-        // Ban status checker
         services.AddScoped<IBanStatusChecker,
             SocialApp.Infrastructure.Services.BanStatusChecker>();
 
@@ -340,6 +305,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INotificationRepository,
             SocialApp.Infrastructure.Repositories.NotificationRepository>();
 
+        // ── MỚI ──────────────────────────────────────────────────────────────
+        services.AddScoped<IPasswordResetRepository,
+            SocialApp.Infrastructure.Repositories.PasswordResetRepository>();
+
         // Services
         services.AddScoped<IAuthService,
             SocialApp.Application.Services.AuthService>();
@@ -357,35 +326,20 @@ public static class ServiceCollectionExtensions
             SocialApp.Application.Services.FriendService>();
         services.AddScoped<INotificationService,
             SocialApp.Application.Services.NotificationService>();
-        // IMessageDbContext — resolve từ AppDbContext đã đăng ký (AddDatabase)
-        // Cho phép MessageService inject interface thay vì concrete class
         services.AddScoped<IMessageDbContext>(sp =>
             sp.GetRequiredService<SocialApp.Infrastructure.Data.AppDbContext>());
-
-        // IAdminDbContext — resolve từ AppDbContext (implement cả 2 interface)
         services.AddScoped<IAdminDbContext>(sp =>
             sp.GetRequiredService<SocialApp.Infrastructure.Data.AppDbContext>());
         services.AddScoped<IMessageService,
             SocialApp.Application.Services.MessageService>();
-
-        // INotificationHub — implement ở API layer dùng SignalR IHubContext
-        // Đăng ký ở đây để Application layer không cần reference API
         services.AddScoped<INotificationHub,
             SocialApp.API.Services.NotificationHubService>();
-
-        // IChatHub — implement ở API layer dùng SignalR IHubContext<ChatHub>
         services.AddScoped<IChatHub,
             SocialApp.API.Services.ChatHubService>();
-
-        // IGeminiService
         services.AddScoped<IGeminiService,
             SocialApp.Application.Services.GeminiService>();
-
-        // IAdminService
         services.AddScoped<IAdminService,
             SocialApp.Application.Services.AdminService>();
-
-        // IGroupRepository & IGroupService
         services.AddScoped<IGroupRepository,
             SocialApp.Infrastructure.Repositories.GroupRepository>();
         services.AddScoped<IGroupService,
@@ -421,9 +375,16 @@ public static class ServiceCollectionExtensions
                 client.DefaultRequestHeaders.Add("Accept", "application/json");
             });
 
+        // ── MỚI: Google Auth + Gmail Email ───────────────────────────────────
+        services.AddHttpClient<IGoogleAuthService,
+            SocialApp.Infrastructure.Services.GoogleAuthService>(client =>
+            { client.Timeout = TimeSpan.FromSeconds(10); });
+
+        services.AddScoped<IEmailService,
+            SocialApp.Infrastructure.Services.GmailEmailService>();
+
         return services;
     }
-
 
     public static IServiceCollection AddSwaggerWithJwt(this IServiceCollection services)
     {
@@ -437,7 +398,6 @@ public static class ServiceCollectionExtensions
                 Description = "Facebook clone — ASP.NET Core 8 Web API"
             });
 
-            // Thêm JWT Bearer vào Swagger UI
             var jwtScheme = new OpenApiSecurityScheme
             {
                 Name = "Authorization",
@@ -464,7 +424,6 @@ public static class ServiceCollectionExtensions
                 }
             });
 
-            // Include XML comments nếu có
             var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
             if (File.Exists(xmlPath))
@@ -500,10 +459,9 @@ public sealed class CloudflareR2Settings
     public string PublicUrl { get; init; } = string.Empty;
     public string VideoFolder { get; init; } = "videos";
     public string AudioFolder { get; init; } = "audio";
-    public long MaxVideoSizeBytes { get; init; } = 524_288_000; // 500 MB
-    public long MaxAudioSizeBytes { get; init; } = 52_428_800;  // 50 MB
+    public long MaxVideoSizeBytes { get; init; } = 524_288_000;
+    public long MaxAudioSizeBytes { get; init; } = 52_428_800;
 }
-
 
 public sealed class RateLimitPolicySettings
 {

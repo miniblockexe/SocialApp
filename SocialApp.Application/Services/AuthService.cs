@@ -17,19 +17,13 @@ using SocialApp.Domain.Enums;
 
 namespace SocialApp.Application.Services;
 
-/// <summary>
-/// Xử lý toàn bộ business logic liên quan đến xác thực:
-/// đăng ký, đăng nhập, refresh token, revoke token, đổi mật khẩu.
-///
-/// Tích hợp:
-///  - Mailboxlayer: xác thực email tồn tại thật khi đăng ký.
-///  - DiceBear:     sinh avatar mặc định theo username khi đăng ký.
-
-/// </summary>
 public sealed class AuthService : IAuthService
 {
     private readonly IUserRepository _userRepo;
     private readonly IRefreshTokenRepository _tokenRepo;
+    private readonly IPasswordResetRepository _resetRepo;
+    private readonly IEmailService _emailService;
+    private readonly IGoogleAuthService _googleAuth;
     private readonly IMapper _mapper;
     private readonly IMemoryCache _cache;
     private readonly JwtSettings _jwtSettings;
@@ -39,36 +33,42 @@ public sealed class AuthService : IAuthService
     private const string LoginAttemptCachePrefix = "login_attempt:";
     private const int MaxLoginAttempts = 5;
     private static readonly TimeSpan LoginLockoutWindow = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan OtpTtl = TimeSpan.FromMinutes(15);
 
-    // DiceBear — avatar SVG tự động theo seed = username
-    // Style avataaars phù hợp với mạng xã hội
     private const string DiceBearBaseUrl = "https://api.dicebear.com/7.x/avataaars/svg";
 
     public AuthService(
         IUserRepository userRepo,
         IRefreshTokenRepository tokenRepo,
+        IPasswordResetRepository resetRepo,
+        IEmailService emailService,
+        IGoogleAuthService googleAuth,
         IMapper mapper,
         IMemoryCache cache,
         IOptions<JwtSettings> jwtOptions,
         IEmailVerificationService emailVerifier,
         ILogger<AuthService> logger)
     {
-        _userRepo      = userRepo;
-        _tokenRepo     = tokenRepo;
-        _mapper        = mapper;
-        _cache         = cache;
-        _jwtSettings   = jwtOptions.Value;
+        _userRepo = userRepo;
+        _tokenRepo = tokenRepo;
+        _resetRepo = resetRepo;
+        _emailService = emailService;
+        _googleAuth = googleAuth;
+        _mapper = mapper;
+        _cache = cache;
+        _jwtSettings = jwtOptions.Value;
         _emailVerifier = emailVerifier;
-        _logger        = logger;
+        _logger = logger;
     }
+
+    // ── RegisterAsync ─────────────────────────────────────────────────────────
 
     public async Task<AuthResponseDto> RegisterAsync(RegisterRequestDto dto)
     {
-        var email    = dto.Email.Trim().ToLower();
+        var email = dto.Email.Trim().ToLower();
         var username = dto.Username.Trim();
         var fullName = dto.FullName.Trim();
 
-        // Mailboxlayer: xác thực email
         var emailCheck = await _emailVerifier.VerifyAsync(email);
         if (emailCheck is not null)
         {
@@ -84,13 +84,10 @@ public sealed class AuthService : IAuthService
                 throw new ArgumentException("EMAIL_DISPOSABLE");
             }
 
-            // smtp_check = false không nhất thiết block — nhiều server chặn ping,
-            // chỉ warn để có thể review sau.
             if (!emailCheck.SmtpValid)
                 _logger.LogWarning("[Register] SMTP check fail cho email: {Email} (vẫn cho đăng ký)", email);
         }
 
-        // Check duplicate
         if (await _userRepo.EmailExistsAsync(email))
         {
             _logger.LogWarning("[Register] Email đã tồn tại: {Email}", email);
@@ -103,23 +100,20 @@ public sealed class AuthService : IAuthService
             throw new InvalidOperationException("USERNAME_EXISTED");
         }
 
-        // Hash password
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password, workFactor: 12);
-
-        // DiceBear: avatar mặc định theo seed = username
         var defaultAvatarUrl = $"{DiceBearBaseUrl}?seed={Uri.EscapeDataString(username)}&backgroundColor=b6e3f4,c0aede,d1d4f9";
 
         var user = new User
         {
-            Id           = Guid.NewGuid(),
-            Username     = username,
-            Email        = email,
+            Id = Guid.NewGuid(),
+            Username = username,
+            Email = email,
             PasswordHash = passwordHash,
-            FullName     = fullName,
-            AvatarUrl    = defaultAvatarUrl,   // ← DiceBear SVG
-            Role         = UserRole.User,
-            IsActive     = true,
-            IsBanned     = false
+            FullName = fullName,
+            AvatarUrl = defaultAvatarUrl,
+            Role = UserRole.User,
+            IsActive = true,
+            IsBanned = false
         };
 
         var refreshToken = GenerateRefreshToken();
@@ -138,32 +132,24 @@ public sealed class AuthService : IAuthService
         }
 
         _logger.LogInformation(
-            "[Register] Thành công — UserId: {UserId}, Email: {Email}, Avatar: DiceBear, {Time:O}",
+            "[Register] Thành công — UserId: {UserId}, Email: {Email}, {Time:O}",
             user.Id, email, DateTime.UtcNow);
 
-        var accessToken = GenerateAccessToken(user);
-        var expiresAt   = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes);
-
-        return new AuthResponseDto
-        {
-            AccessToken  = accessToken,
-            RefreshToken = refreshToken.Token,
-            ExpiresAt    = expiresAt,
-            User         = _mapper.Map<UserBriefDto>(user)
-        };
+        return BuildAuthResponse(user, refreshToken);
     }
+
+    // ── LoginAsync ────────────────────────────────────────────────────────────
 
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto dto, string ipAddress)
     {
-        var email    = dto.Email.Trim().ToLower();
+        var email = dto.Email.Trim().ToLower();
         var cacheKey = $"{LoginAttemptCachePrefix}{ipAddress}";
 
-        // Rate limit: kiểm tra số lần thất bại từ IP
         if (_cache.TryGetValue(cacheKey, out LoginAttemptRecord? record) && record is not null)
         {
             if (record.Count >= MaxLoginAttempts)
             {
-                var remaining        = LoginLockoutWindow - (DateTime.UtcNow - record.FirstAttemptAt);
+                var remaining = LoginLockoutWindow - (DateTime.UtcNow - record.FirstAttemptAt);
                 var remainingSeconds = (int)Math.Ceiling(remaining.TotalSeconds);
 
                 _logger.LogWarning(
@@ -195,8 +181,7 @@ public sealed class AuthService : IAuthService
 
         var user = await _userRepo.FirstOrDefaultAsync(u => u.Id == userReadOnly.Id) ?? userReadOnly;
 
-        // Revoke tất cả active token cũ
-        var now          = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
         var activeTokens = await _tokenRepo.GetActiveTokensByUserIdAsync(user.Id);
         foreach (var token in activeTokens)
         {
@@ -205,9 +190,8 @@ public sealed class AuthService : IAuthService
         }
         _tokenRepo.UpdateRange(activeTokens);
 
-        // Tạo refresh token mới
         var newRefreshToken = GenerateRefreshToken();
-        newRefreshToken.UserId    = user.Id;
+        newRefreshToken.UserId = user.Id;
         newRefreshToken.IpAddress = ipAddress;
 
         user.LastSeen = now;
@@ -220,17 +204,149 @@ public sealed class AuthService : IAuthService
             "[Login] Thành công — UserId: {UserId}, IP: {IP}, {Time:O}",
             user.Id, ipAddress, now);
 
-        var accessToken = GenerateAccessToken(user);
-        var expiresAt   = now.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes);
-
-        return new AuthResponseDto
-        {
-            AccessToken  = accessToken,
-            RefreshToken = newRefreshToken.Token,
-            ExpiresAt    = expiresAt,
-            User         = _mapper.Map<UserBriefDto>(user)
-        };
+        return BuildAuthResponse(user, newRefreshToken);
     }
+
+    // ── GoogleLoginAsync ──────────────────────────────────────────────────────
+
+    public async Task<AuthResponseDto> GoogleLoginAsync(string idToken, string ipAddress)
+    {
+        var info = await _googleAuth.VerifyIdTokenAsync(idToken)
+            ?? throw new UnauthorizedAccessException("Google token không hợp lệ.");
+
+        if (!info.EmailVerified)
+            throw new UnauthorizedAccessException("Email Google chưa được xác thực.");
+
+        var email = info.Email.Trim().ToLower();
+        var user = await _userRepo.GetByEmailAsync(email);
+
+        if (user is null)
+        {
+            // Auto-register: tạo tài khoản mới từ thông tin Google
+            var baseUsername = email.Split('@')[0].ToLower()
+                .Replace(".", "_").Replace("+", "_");
+            var username = baseUsername;
+            var suffix = 1;
+            while (await _userRepo.UsernameExistsAsync(username))
+                username = $"{baseUsername}{suffix++}";
+
+            user = new User
+            {
+                Id = Guid.NewGuid(),
+                Username = username,
+                Email = email,
+                FullName = info.Name,
+                PasswordHash = string.Empty, // Google user không có password
+                AvatarUrl = info.Picture
+                    ?? $"{DiceBearBaseUrl}?seed={Uri.EscapeDataString(username)}&backgroundColor=b6e3f4,c0aede,d1d4f9",
+                Role = UserRole.User,
+                IsActive = true,
+                IsBanned = false
+            };
+
+            var rt0 = GenerateRefreshToken();
+            rt0.UserId = user.Id;
+            rt0.IpAddress = ipAddress;
+
+            await _userRepo.AddAsync(user);
+            await _tokenRepo.AddAsync(rt0);
+            await _tokenRepo.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "[GoogleLogin] Tạo tài khoản mới — UserId: {UserId}, Email: {Email}",
+                user.Id, email);
+
+            return BuildAuthResponse(user, rt0);
+        }
+
+        if (user.IsBanned)
+            throw new ForbiddenException("Tài khoản đã bị khóa.");
+
+        // Revoke active token cũ
+        var now = DateTime.UtcNow;
+        var active = await _tokenRepo.GetActiveTokensByUserIdAsync(user.Id);
+        foreach (var t in active) { t.IsRevoked = true; t.RevokedAt = now; }
+        _tokenRepo.UpdateRange(active);
+
+        var newToken = GenerateRefreshToken();
+        newToken.UserId = user.Id;
+        newToken.IpAddress = ipAddress;
+
+        user.LastSeen = now;
+        _userRepo.Update(user);
+
+        await _tokenRepo.AddAsync(newToken);
+        await _tokenRepo.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "[GoogleLogin] Đăng nhập thành công — UserId: {UserId}", user.Id);
+
+        return BuildAuthResponse(user, newToken);
+    }
+
+    // ── ForgotPasswordAsync ───────────────────────────────────────────────────
+
+    public async Task ForgotPasswordAsync(string email)
+    {
+        var normalised = email.Trim().ToLower();
+        var user = await _userRepo.GetByEmailAsync(normalised);
+
+        // Luôn return bình thường để tránh user enumeration
+        if (user is null) return;
+
+        // Xoá token cũ, tạo OTP mới 6 số
+        await _resetRepo.DeleteAllForUserAsync(user.Id);
+
+        var otp = GenerateOtp();
+        var token = new PasswordResetToken
+        {
+            UserId = user.Id,
+            Token = otp,
+            ExpiresAt = DateTime.UtcNow.Add(OtpTtl)
+        };
+
+        await _resetRepo.AddAsync(token);
+        await _resetRepo.SaveChangesAsync();
+
+        await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, otp);
+
+        _logger.LogInformation(
+            "[ForgotPassword] OTP gửi thành công — UserId: {UserId}", user.Id);
+    }
+
+    // ── ResetPasswordAsync ────────────────────────────────────────────────────
+
+    public async Task ResetPasswordAsync(ResetPasswordDto dto)
+    {
+        if (dto.NewPassword != dto.ConfirmNewPassword)
+            throw new ArgumentException("Mật khẩu xác nhận không khớp.");
+
+        var normalised = dto.Email.Trim().ToLower();
+        var storedToken = await _resetRepo.GetActiveTokenAsync(normalised, dto.Token.Trim());
+
+        if (storedToken is null || storedToken.IsUsed || storedToken.ExpiresAt < DateTime.UtcNow)
+            throw new InvalidOperationException("OTP không hợp lệ hoặc đã hết hạn.");
+
+        var user = await _userRepo.GetByIdAsync(storedToken.UserId)
+            ?? throw new KeyNotFoundException("Tài khoản không tồn tại.");
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword, workFactor: 12);
+        storedToken.IsUsed = true;
+        _userRepo.Update(user);
+
+        // Revoke toàn bộ refresh token — force logout tất cả thiết bị
+        var now = DateTime.UtcNow;
+        var allTokens = await _tokenRepo.GetNonRevokedTokensByUserIdAsync(user.Id);
+        foreach (var t in allTokens) { t.IsRevoked = true; t.RevokedAt = now; }
+        _tokenRepo.UpdateRange(allTokens);
+
+        await _resetRepo.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "[ResetPassword] OK — UserId: {UserId}", user.Id);
+    }
+
+    // ── RefreshTokenAsync ─────────────────────────────────────────────────────
 
     public async Task<AuthResponseDto> RefreshTokenAsync(string refreshToken)
     {
@@ -245,16 +361,11 @@ public sealed class AuthService : IAuthService
             throw new UnauthorizedAccessException("Token không hợp lệ.");
         }
 
-        // REPLAY ATTACK: token đã revoke mà vẫn dùng lại
         if (storedToken.IsRevoked)
         {
-            var utcNow      = DateTime.UtcNow;
-            var allActive   = await _tokenRepo.GetNonRevokedTokensByUserIdAsync(storedToken.UserId);
-            foreach (var t in allActive)
-            {
-                t.IsRevoked = true;
-                t.RevokedAt = utcNow;
-            }
+            var utcNow = DateTime.UtcNow;
+            var allActive = await _tokenRepo.GetNonRevokedTokensByUserIdAsync(storedToken.UserId);
+            foreach (var t in allActive) { t.IsRevoked = true; t.RevokedAt = utcNow; }
             _tokenRepo.UpdateRange(allActive);
             await _tokenRepo.SaveChangesAsync();
 
@@ -279,15 +390,13 @@ public sealed class AuthService : IAuthService
             throw new ForbiddenException("Tài khoản đã bị khóa.");
         }
 
-        // Token rotation
         var now = DateTime.UtcNow;
         storedToken.IsRevoked = true;
         storedToken.RevokedAt = now;
         _tokenRepo.Update(storedToken);
 
         var newRefreshToken = GenerateRefreshToken();
-        newRefreshToken.UserId    = user.Id;
-        // Kế thừa IP từ token cũ
+        newRefreshToken.UserId = user.Id;
         newRefreshToken.IpAddress = storedToken.IpAddress;
 
         await _tokenRepo.AddAsync(newRefreshToken);
@@ -295,17 +404,10 @@ public sealed class AuthService : IAuthService
 
         _logger.LogInformation("[Refresh] Token rotation OK — UserId: {UserId}, {Time:O}", user.Id, now);
 
-        var accessToken = GenerateAccessToken(user);
-        var expiresAt   = now.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes);
-
-        return new AuthResponseDto
-        {
-            AccessToken  = accessToken,
-            RefreshToken = newRefreshToken.Token,
-            ExpiresAt    = expiresAt,
-            User         = _mapper.Map<UserBriefDto>(user)
-        };
+        return BuildAuthResponse(user, newRefreshToken);
     }
+
+    // ── RevokeTokenAsync ──────────────────────────────────────────────────────
 
     public async Task RevokeTokenAsync(string refreshToken, Guid userId)
     {
@@ -342,6 +444,8 @@ public sealed class AuthService : IAuthService
         _logger.LogInformation("[Revoke] UserId: {UserId}, {Time:O}", userId, DateTime.UtcNow);
     }
 
+    // ── ChangePasswordAsync ───────────────────────────────────────────────────
+
     public async Task ChangePasswordAsync(Guid userId, ChangePasswordDto dto)
     {
         if (userId == Guid.Empty)
@@ -366,13 +470,9 @@ public sealed class AuthService : IAuthService
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword, workFactor: 12);
         _userRepo.Update(user);
 
-        var now       = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
         var allTokens = await _tokenRepo.GetNonRevokedTokensByUserIdAsync(userId);
-        foreach (var token in allTokens)
-        {
-            token.IsRevoked = true;
-            token.RevokedAt = now;
-        }
+        foreach (var token in allTokens) { token.IsRevoked = true; token.RevokedAt = now; }
         _tokenRepo.UpdateRange(allTokens);
         await _tokenRepo.SaveChangesAsync();
 
@@ -381,14 +481,16 @@ public sealed class AuthService : IAuthService
             userId, allTokens.Count, now);
     }
 
+    // ── Token helpers ─────────────────────────────────────────────────────────
+
     public string GenerateAccessToken(User user)
     {
-        var key         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
         {
-            new Claim(JwtRegisteredClaimNames.Sub,  user.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Sub,   user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim("preferred_username",           user.Username),
             new Claim(ClaimTypes.Role,                user.Role.ToString()),
@@ -398,11 +500,11 @@ public sealed class AuthService : IAuthService
         var expiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes);
 
         var token = new JwtSecurityToken(
-            issuer:             _jwtSettings.Issuer,
-            audience:           _jwtSettings.Audience,
-            claims:             claims,
-            notBefore:          DateTime.UtcNow,
-            expires:            expiresAt,
+            issuer: _jwtSettings.Issuer,
+            audience: _jwtSettings.Audience,
+            claims: claims,
+            notBefore: DateTime.UtcNow,
+            expires: expiresAt,
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
@@ -412,33 +514,51 @@ public sealed class AuthService : IAuthService
     {
         return new RefreshToken
         {
-            Id        = Guid.NewGuid(),
-            Token     = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
+            Id = Guid.NewGuid(),
+            Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
             ExpiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationDays),
             CreatedAt = DateTime.UtcNow,
             IsRevoked = false
         };
     }
 
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private AuthResponseDto BuildAuthResponse(User user, RefreshToken rt)
+    {
+        var accessToken = GenerateAccessToken(user);
+        var expiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes);
+        return new AuthResponseDto
+        {
+            AccessToken = accessToken,
+            RefreshToken = rt.Token,
+            ExpiresAt = expiresAt,
+            User = _mapper.Map<UserBriefDto>(user)
+        };
+    }
+
+    private static string GenerateOtp()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(4);
+        var num = BitConverter.ToUInt32(bytes, 0) % 1_000_000;
+        return num.ToString("D6");
+    }
+
     private void IncrementLoginAttempt(string cacheKey)
     {
         var now = DateTime.UtcNow;
         if (_cache.TryGetValue(cacheKey, out LoginAttemptRecord? existing) && existing is not null)
-        {
             _cache.Set(cacheKey, existing with { Count = existing.Count + 1 }, LoginLockoutWindow);
-        }
         else
-        {
             _cache.Set(cacheKey, new LoginAttemptRecord(Count: 1, FirstAttemptAt: now), LoginLockoutWindow);
-        }
     }
 
     private static bool IsUniqueConstraintViolation(Exception ex)
     {
         var msg = ex.InnerException?.Message ?? ex.Message;
-        return msg.Contains("23505",             StringComparison.OrdinalIgnoreCase)
+        return msg.Contains("23505", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase)
-            || msg.Contains("duplicate key",     StringComparison.OrdinalIgnoreCase);
+            || msg.Contains("duplicate key", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string MaskToken(string token)
@@ -448,5 +568,4 @@ public sealed class AuthService : IAuthService
     }
 }
 
-// Internal record cho login attempt tracking
 internal sealed record LoginAttemptRecord(int Count, DateTime FirstAttemptAt);

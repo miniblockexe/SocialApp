@@ -11,10 +11,6 @@ using SocialApp.Application.Services;
 
 namespace SocialApp.API.Controllers;
 
-/// <summary>
-/// Xử lý đăng ký, đăng nhập, làm mới token, thu hồi token và đổi mật khẩu.
-/// Tất cả response đều theo chuẩn ApiResponse&lt;T&gt;.
-/// </summary>
 [ApiController]
 [Route("api/auth")]
 [Produces("application/json")]
@@ -24,6 +20,8 @@ public sealed class AuthController : ControllerBase
     private readonly IValidator<RegisterRequestDto> _registerValidator;
     private readonly IValidator<LoginRequestDto> _loginValidator;
     private readonly IValidator<ChangePasswordDto> _changePasswordValidator;
+    private readonly IValidator<ForgotPasswordDto> _forgotPasswordValidator;
+    private readonly IValidator<ResetPasswordDto> _resetPasswordValidator;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -31,23 +29,20 @@ public sealed class AuthController : ControllerBase
         IValidator<RegisterRequestDto> registerValidator,
         IValidator<LoginRequestDto> loginValidator,
         IValidator<ChangePasswordDto> changePasswordValidator,
+        IValidator<ForgotPasswordDto> forgotPasswordValidator,
+        IValidator<ResetPasswordDto> resetPasswordValidator,
         ILogger<AuthController> logger)
     {
         _authService = authService;
         _registerValidator = registerValidator;
         _loginValidator = loginValidator;
         _changePasswordValidator = changePasswordValidator;
+        _forgotPasswordValidator = forgotPasswordValidator;
+        _resetPasswordValidator = resetPasswordValidator;
         _logger = logger;
     }
 
-
-
     /// <summary>Đăng ký tài khoản mới.</summary>
-    /// <param name="dto">Thông tin đăng ký: username, email, password, fullName.</param>
-    /// <response code="201">Đăng ký thành công — trả về cặp token và thông tin user.</response>
-    /// <response code="400">Body rỗng hoặc null.</response>
-    /// <response code="409">Email hoặc username đã được sử dụng.</response>
-    /// <response code="422">Dữ liệu đầu vào không hợp lệ (validation errors).</response>
     [HttpPost("register")]
     [EnableRateLimiting("register")]
     [ProducesResponseType(typeof(ApiResponse<AuthResponseDto>), StatusCodes.Status201Created)]
@@ -74,7 +69,6 @@ public sealed class AuthController : ControllerBase
                 "[POST /api/auth/register] Đăng ký thành công — UserId: {UserId}, thời gian: {Time:O}",
                 result.User.Id, DateTime.UtcNow);
 
-            // 201 Created — không có Location header vì UserController chưa tồn tại
             return StatusCode(StatusCodes.Status201Created,
                 ApiResponse<AuthResponseDto>.Created(result, "Đăng ký thành công."));
         }
@@ -88,15 +82,7 @@ public sealed class AuthController : ControllerBase
         }
     }
 
-
-
     /// <summary>Đăng nhập bằng email và mật khẩu.</summary>
-    /// <param name="dto">Email và mật khẩu.</param>
-    /// <response code="200">Đăng nhập thành công — trả về cặp token và thông tin user.</response>
-    /// <response code="400">Body rỗng hoặc null.</response>
-    /// <response code="401">Email hoặc mật khẩu không đúng.</response>
-    /// <response code="422">Dữ liệu đầu vào không hợp lệ.</response>
-    /// <response code="429">Quá nhiều lần đăng nhập thất bại từ IP này — thử lại sau.</response>
     [HttpPost("login")]
     [EnableRateLimiting("login")]
     [ProducesResponseType(typeof(ApiResponse<AuthResponseDto>), StatusCodes.Status200OK)]
@@ -130,26 +116,108 @@ public sealed class AuthController : ControllerBase
         }
         catch (TooManyRequestsException ex)
         {
-            // Giữ nguyên ex.Message vì service đã tính thời gian còn lại cụ thể
             return StatusCode(StatusCodes.Status429TooManyRequests,
                 ApiResponse<AuthResponseDto>.TooManyRequests(ex.Message));
         }
         catch (UnauthorizedAccessException ex)
         {
-            // Không dùng GlobalExceptionMiddleware vì nó override thành message chung;
-            // ở đây cần giữ "Email hoặc mật khẩu không đúng." để trả đúng spec
             return Unauthorized(ApiResponse<AuthResponseDto>.Unauthorized(ex.Message));
         }
     }
 
+    /// <summary>Đăng nhập bằng Google ID Token — tự động tạo tài khoản nếu chưa có.</summary>
+    [HttpPost("google-login")]
+    [EnableRateLimiting("login")]
+    [ProducesResponseType(typeof(ApiResponse<AuthResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginDto? dto)
+    {
+        if (dto is null || string.IsNullOrWhiteSpace(dto.IdToken))
+            return BadRequest(ApiResponse<AuthResponseDto>.BadRequest("IdToken không được để trống."));
 
+        var ipAddress = GetClientIpAddress();
 
-    /// <summary>Làm mới cặp access token và refresh token (token rotation).</summary>
-    /// <param name="dto">Refresh token hiện tại.</param>
-    /// <response code="200">Token mới đã được tạo và token cũ đã bị thu hồi.</response>
-    /// <response code="400">Body rỗng hoặc refresh token trống.</response>
-    /// <response code="401">Token không hợp lệ, đã revoke, hoặc đã hết hạn.</response>
-    /// <response code="403">Tài khoản đã bị khóa.</response>
+        try
+        {
+            var result = await _authService.GoogleLoginAsync(dto.IdToken, ipAddress);
+
+            _logger.LogInformation(
+                "[POST /api/auth/google-login] Đăng nhập Google thành công — UserId: {UserId}, thời gian: {Time:O}",
+                result.User.Id, DateTime.UtcNow);
+
+            return Ok(ApiResponse<AuthResponseDto>.Ok(result, "Đăng nhập Google thành công."));
+        }
+        catch (ForbiddenException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<AuthResponseDto>.Forbidden(ex.Message));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(ApiResponse<AuthResponseDto>.Unauthorized(ex.Message));
+        }
+    }
+
+    /// <summary>Gửi OTP reset mật khẩu qua email — luôn 204 để tránh user enumeration.</summary>
+    [HttpPost("forgot-password")]
+    [EnableRateLimiting("register")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto? dto)
+    {
+        if (dto is null)
+            return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
+
+        var validation = await _forgotPasswordValidator.ValidateAsync(dto);
+        if (!validation.IsValid)
+        {
+            var errors = validation.Errors.Select(e => e.ErrorMessage).ToList();
+            return UnprocessableEntity(ApiResponse.UnprocessableEntity(errors));
+        }
+
+        await _authService.ForgotPasswordAsync(dto.Email);
+        return NoContent();
+    }
+
+    /// <summary>Xác thực OTP và đặt mật khẩu mới.</summary>
+    [HttpPost("reset-password")]
+    [EnableRateLimiting("login")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto? dto)
+    {
+        if (dto is null)
+            return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
+
+        var validation = await _resetPasswordValidator.ValidateAsync(dto);
+        if (!validation.IsValid)
+        {
+            var errors = validation.Errors.Select(e => e.ErrorMessage).ToList();
+            return UnprocessableEntity(ApiResponse.UnprocessableEntity(errors));
+        }
+
+        try
+        {
+            await _authService.ResetPasswordAsync(dto);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ApiResponse.BadRequest(ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ApiResponse.BadRequest(ex.Message));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse.NotFound(ex.Message));
+        }
+    }
+
+    /// <summary>Làm mới cặp token (token rotation).</summary>
     [HttpPost("refresh")]
     [ProducesResponseType(typeof(ApiResponse<AuthResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
@@ -167,26 +235,16 @@ public sealed class AuthController : ControllerBase
         }
         catch (ForbiddenException ex)
         {
-            // ForbiddenException không được GlobalExceptionMiddleware handle → catch tại đây
             return StatusCode(StatusCodes.Status403Forbidden,
                 ApiResponse<AuthResponseDto>.Forbidden(ex.Message));
         }
         catch (UnauthorizedAccessException ex)
         {
-            // Giữ message cụ thể: "Token không hợp lệ.", "Token đã bị thu hồi...", "Token đã hết hạn."
             return Unauthorized(ApiResponse<AuthResponseDto>.Unauthorized(ex.Message));
         }
     }
 
-
-
-    /// <summary>Thu hồi một refresh token (đăng xuất khỏi một thiết bị cụ thể).</summary>
-    /// <param name="dto">Refresh token cần thu hồi.</param>
-    /// <response code="204">Token đã được thu hồi thành công.</response>
-    /// <response code="400">Token đã được thu hồi trước đó hoặc body không hợp lệ.</response>
-    /// <response code="401">Chưa đăng nhập hoặc JWT không hợp lệ.</response>
-    /// <response code="403">Token không thuộc về người dùng này.</response>
-    /// <response code="404">Token không tồn tại trong hệ thống.</response>
+    /// <summary>Thu hồi một refresh token (đăng xuất khỏi một thiết bị).</summary>
     [HttpPost("revoke")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -199,7 +257,6 @@ public sealed class AuthController : ControllerBase
         if (dto is null || string.IsNullOrWhiteSpace(dto.RefreshToken))
             return BadRequest(ApiResponse.BadRequest("Refresh token không được để trống."));
 
-        // [Authorize] đảm bảo user đã xác thực; GetUserIdOrThrow throw nếu claim sub thiếu
         var userId = User.GetUserIdOrThrow();
 
         try
@@ -221,15 +278,7 @@ public sealed class AuthController : ControllerBase
         }
     }
 
-
-
-    /// <summary>Đổi mật khẩu và force logout toàn bộ thiết bị đang đăng nhập.</summary>
-    /// <param name="dto">Mật khẩu cũ, mật khẩu mới và xác nhận mật khẩu mới.</param>
-    /// <response code="204">Đổi mật khẩu thành công, toàn bộ phiên đăng nhập đã bị thu hồi.</response>
-    /// <response code="400">Mật khẩu cũ sai hoặc mật khẩu mới trùng mật khẩu cũ.</response>
-    /// <response code="401">Chưa đăng nhập hoặc JWT không hợp lệ.</response>
-    /// <response code="404">Tài khoản không tồn tại.</response>
-    /// <response code="422">Dữ liệu đầu vào không hợp lệ (validation errors).</response>
+    /// <summary>Đổi mật khẩu và force logout toàn bộ thiết bị.</summary>
     [HttpPut("change-password")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -275,13 +324,6 @@ public sealed class AuthController : ControllerBase
         }
     }
 
-
-
-    /// <summary>
-    /// Lấy IP thực của client.
-    /// Ưu tiên header X-Forwarded-For (khi có reverse proxy / load balancer / CDN).
-    /// Fallback về RemoteIpAddress nếu kết nối trực tiếp.
-    /// </summary>
     private string GetClientIpAddress()
     {
         var forwarded = HttpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
