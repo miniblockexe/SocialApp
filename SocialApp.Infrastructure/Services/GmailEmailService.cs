@@ -128,7 +128,7 @@ public sealed class GmailEmailService : IEmailService
                      style="background:#1a1a1e;border-radius:16px;overflow:hidden;border:1px solid #2a2a30;">
                 <tr>
                   <td style="background:linear-gradient(135deg,#e74c3c,#c0392b);padding:32px 40px;text-align:center;">
-                    <div style="font-size:28px;font-weight:800;color:#fff;">S SocialApp</div>
+                    <div style="font-size:28px;font-weight:800;color:#fff;">SocialApp</div>
                   </td>
                 </tr>
                 <tr>
@@ -150,7 +150,7 @@ public sealed class GmailEmailService : IEmailService
                 </tr>
                 <tr>
                   <td style="padding:20px 40px;border-top:1px solid #2a2a30;text-align:center;color:#606070;font-size:12px;">
-                    © 2025 SocialApp · Email tự động, vui lòng không trả lời.
+                    © 2026 SocialApp · Email tự động, vui lòng không trả lời.
                   </td>
                 </tr>
               </table>
