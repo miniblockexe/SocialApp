@@ -327,14 +327,13 @@ public sealed class AuthService : IAuthService
         if (storedToken is null || storedToken.IsUsed || storedToken.ExpiresAt < DateTime.UtcNow)
             throw new InvalidOperationException("OTP không hợp lệ hoặc đã hết hạn.");
 
-        var user = await _userRepo.GetByIdAsync(storedToken.UserId)
+        var user = storedToken.User
             ?? throw new KeyNotFoundException("Tài khoản không tồn tại.");
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword, workFactor: 12);
         storedToken.IsUsed = true;
         _userRepo.Update(user);
 
-        // Revoke toàn bộ refresh token — force logout tất cả thiết bị
         var now = DateTime.UtcNow;
         var allTokens = await _tokenRepo.GetNonRevokedTokensByUserIdAsync(user.Id);
         foreach (var t in allTokens) { t.IsRevoked = true; t.RevokedAt = now; }
@@ -342,8 +341,7 @@ public sealed class AuthService : IAuthService
 
         await _resetRepo.SaveChangesAsync();
 
-        _logger.LogInformation(
-            "[ResetPassword] OK — UserId: {UserId}", user.Id);
+        _logger.LogInformation("[ResetPassword] OK — UserId: {UserId}", user.Id);
     }
 
     // ── RefreshTokenAsync ─────────────────────────────────────────────────────
