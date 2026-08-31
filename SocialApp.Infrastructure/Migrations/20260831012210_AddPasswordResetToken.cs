@@ -20,7 +20,7 @@ namespace SocialApp.Infrastructure.Migrations
                     Token = table.Column<string>(type: "character varying(6)", maxLength: 6, nullable: false),
                     ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    IsUsed = table.Column<bool>(type: "boolean", nullable: false)
+                    IsUsed = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false)
                 },
                 constraints: table =>
                 {

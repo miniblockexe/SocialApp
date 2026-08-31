@@ -8,10 +8,6 @@ using SocialApp.Application.Settings;
 
 namespace SocialApp.Infrastructure.Services;
 
-/// <summary>
-/// Gửi email qua Gmail SMTP dùng MailKit.
-/// Cần bật "App Password" trong tài khoản Google (không dùng mật khẩu thường).
-/// </summary>
 public sealed class GmailEmailService : IEmailService
 {
     private readonly GmailSettings _settings;
@@ -34,13 +30,13 @@ public sealed class GmailEmailService : IEmailService
         message.From.Add(new MailboxAddress(_settings.SenderName, _settings.SenderEmail));
         message.To.Add(new MailboxAddress(toName, toEmail));
         message.Subject = "Đặt lại mật khẩu SocialApp";
-
         message.Body = new TextPart("html")
         {
             Text = BuildResetEmailHtml(toName, resetToken)
         };
 
         using var client = new SmtpClient();
+        client.Timeout = 10_000; // 10 giây — đủ cho 587, không treo FE
 
         try
         {
@@ -49,14 +45,11 @@ public sealed class GmailEmailService : IEmailService
             await client.SendAsync(message);
             await client.DisconnectAsync(true);
 
-            _logger.LogInformation(
-                "[Email] Gửi reset password thành công → {Email}", toEmail);
+            _logger.LogInformation("[Email] Gửi thành công → {Email}", toEmail);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "[Email] Gửi reset password thất bại → {Email}", toEmail);
-            // Không throw — caller không cần biết lỗi SMTP để tránh user enumeration
+            _logger.LogError(ex, "[Email] Gửi thất bại → {Email}", toEmail);
         }
     }
 
@@ -69,13 +62,11 @@ public sealed class GmailEmailService : IEmailService
             <tr><td align="center" style="padding:40px 16px;">
               <table width="520" cellpadding="0" cellspacing="0"
                      style="background:#1a1a1e;border-radius:16px;overflow:hidden;border:1px solid #2a2a30;">
-                <!-- Header -->
                 <tr>
                   <td style="background:linear-gradient(135deg,#e74c3c,#c0392b);padding:32px 40px;text-align:center;">
                     <div style="font-size:28px;font-weight:800;color:#fff;letter-spacing:-0.5px;">S SocialApp</div>
                   </td>
                 </tr>
-                <!-- Body -->
                 <tr>
                   <td style="padding:40px;color:#e0e0e8;">
                     <h2 style="margin:0 0 16px;font-size:22px;color:#fff;">Đặt lại mật khẩu</h2>
@@ -84,7 +75,6 @@ public sealed class GmailEmailService : IEmailService
                       Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.
                       Sử dụng mã OTP bên dưới — mã có hiệu lực trong <strong style="color:#fff">15 phút</strong>.
                     </p>
-                    <!-- OTP box -->
                     <div style="background:#0f0f10;border:1px solid #3a3a44;border-radius:12px;
                                 padding:28px;text-align:center;margin-bottom:28px;">
                       <div style="font-size:42px;font-weight:800;letter-spacing:12px;
@@ -97,7 +87,6 @@ public sealed class GmailEmailService : IEmailService
                     </p>
                   </td>
                 </tr>
-                <!-- Footer -->
                 <tr>
                   <td style="padding:20px 40px;border-top:1px solid #2a2a30;
                              text-align:center;color:#606070;font-size:12px;">
