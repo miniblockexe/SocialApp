@@ -380,8 +380,10 @@ public static class ServiceCollectionExtensions
             SocialApp.Infrastructure.Services.GoogleAuthService>(client =>
             { client.Timeout = TimeSpan.FromSeconds(10); });
 
-        services.AddScoped<IEmailService,
-            SocialApp.Infrastructure.Services.GmailEmailService>();
+        services.AddHttpClient<IEmailService, GmailEmailService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
 
         return services;
     }
