@@ -163,21 +163,39 @@ public sealed class AuthController : ControllerBase
     [HttpPost("forgot-password")]
     [EnableRateLimiting("register")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto? dto)
     {
-        if (dto is null)
-            return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
+        if (dto is null) return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
 
         var validation = await _forgotPasswordValidator.ValidateAsync(dto);
         if (!validation.IsValid)
-        {
-            var errors = validation.Errors.Select(e => e.ErrorMessage).ToList();
-            return UnprocessableEntity(ApiResponse.UnprocessableEntity(errors));
-        }
+            return UnprocessableEntity(ApiResponse.UnprocessableEntity(
+                validation.Errors.Select(e => e.ErrorMessage).ToList()));
 
         await _authService.ForgotPasswordAsync(dto.Email);
         return NoContent();
+    }
+
+    [HttpPost("verify-otp")]
+    [EnableRateLimiting("login")]
+    [ProducesResponseType(typeof(ApiResponse<VerifyOtpResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpDto? dto)
+    {
+        if (dto is null) return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
+
+        if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Token))
+            return BadRequest(ApiResponse.BadRequest("Email và OTP không được để trống."));
+
+        try
+        {
+            var result = await _authService.VerifyOtpAsync(dto.Email, dto.Token);
+            return Ok(ApiResponse<VerifyOtpResponseDto>.Ok(result, "OTP hợp lệ."));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ApiResponse.BadRequest(ex.Message));
+        }
     }
 
     /// <summary>Xác thực OTP và đặt mật khẩu mới.</summary>
@@ -185,36 +203,23 @@ public sealed class AuthController : ControllerBase
     [EnableRateLimiting("login")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto? dto)
     {
-        if (dto is null)
-            return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
+        if (dto is null) return BadRequest(ApiResponse.BadRequest("Body không được để trống."));
 
         var validation = await _resetPasswordValidator.ValidateAsync(dto);
         if (!validation.IsValid)
-        {
-            var errors = validation.Errors.Select(e => e.ErrorMessage).ToList();
-            return UnprocessableEntity(ApiResponse.UnprocessableEntity(errors));
-        }
+            return UnprocessableEntity(ApiResponse.UnprocessableEntity(
+                validation.Errors.Select(e => e.ErrorMessage).ToList()));
 
         try
         {
             await _authService.ResetPasswordAsync(dto);
             return NoContent();
         }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ApiResponse.BadRequest(ex.Message));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ApiResponse.BadRequest(ex.Message));
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(ApiResponse.NotFound(ex.Message));
-        }
+        catch (ArgumentException ex) { return BadRequest(ApiResponse.BadRequest(ex.Message)); }
+        catch (InvalidOperationException ex) { return BadRequest(ApiResponse.BadRequest(ex.Message)); }
+        catch (KeyNotFoundException ex) { return NotFound(ApiResponse.NotFound(ex.Message)); }
     }
 
     /// <summary>Làm mới cặp token (token rotation).</summary>

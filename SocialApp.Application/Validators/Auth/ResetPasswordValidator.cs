@@ -10,9 +10,8 @@ public sealed class ResetPasswordValidator : AbstractValidator<ResetPasswordDto>
         RuleFor(x => x.Email)
             .NotEmpty().EmailAddress();
 
-        RuleFor(x => x.Token)
-            .NotEmpty().WithMessage("OTP không được để trống.")
-            .Length(6).WithMessage("OTP phải có đúng 6 ký tự.");
+        RuleFor(x => x.VerifyToken)
+            .NotEmpty().WithMessage("VerifyToken không được để trống.");
 
         RuleFor(x => x.NewPassword)
             .NotEmpty().WithMessage("Mật khẩu mới không được để trống.")

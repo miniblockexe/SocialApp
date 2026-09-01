@@ -34,6 +34,7 @@ public sealed class AuthService : IAuthService
     private const int MaxLoginAttempts = 5;
     private static readonly TimeSpan LoginLockoutWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan OtpTtl = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan VerifyTokenTtl = TimeSpan.FromMinutes(5);
 
     private const string DiceBearBaseUrl = "https://api.dicebear.com/7.x/avataaars/svg";
 
@@ -291,27 +292,44 @@ public sealed class AuthService : IAuthService
         var normalised = email.Trim().ToLower();
         var user = await _userRepo.GetByEmailAsync(normalised);
 
-        // Luôn return bình thường để tránh user enumeration
         if (user is null) return;
 
-        // Xoá token cũ, tạo OTP mới 6 số
         await _resetRepo.DeleteAllForUserAsync(user.Id);
 
-        var otp = GenerateOtp();
         var token = new PasswordResetToken
         {
             UserId = user.Id,
-            Token = otp,
+            Token = GenerateOtp(),
             ExpiresAt = DateTime.UtcNow.Add(OtpTtl)
         };
 
         await _resetRepo.AddAsync(token);
         await _resetRepo.SaveChangesAsync();
 
-        await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, otp);
+        await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, token.Token);
 
-        _logger.LogInformation(
-            "[ForgotPassword] OTP gửi thành công — UserId: {UserId}", user.Id);
+        _logger.LogInformation("[ForgotPassword] OTP gửi → UserId: {UserId}", user.Id);
+    }
+
+    public async Task<VerifyOtpResponseDto> VerifyOtpAsync(string email, string otp)
+    {
+        var normalised = email.Trim().ToLower();
+        var storedToken = await _resetRepo.GetActiveTokenAsync(normalised, otp.Trim());
+
+        if (storedToken is null)
+            throw new InvalidOperationException("OTP không hợp lệ hoặc đã hết hạn.");
+
+        storedToken.IsUsed = true;
+
+        var verifyToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        storedToken.VerifyToken = verifyToken;
+        storedToken.VerifyTokenExpiresAt = DateTime.UtcNow.Add(VerifyTokenTtl);
+
+        await _resetRepo.SaveChangesAsync();
+
+        _logger.LogInformation("[VerifyOtp] OK → UserId: {UserId}", storedToken.UserId);
+
+        return new VerifyOtpResponseDto { VerifyToken = verifyToken };
     }
 
     // ── ResetPasswordAsync ────────────────────────────────────────────────────
@@ -322,16 +340,16 @@ public sealed class AuthService : IAuthService
             throw new ArgumentException("Mật khẩu xác nhận không khớp.");
 
         var normalised = dto.Email.Trim().ToLower();
-        var storedToken = await _resetRepo.GetActiveTokenAsync(normalised, dto.Token.Trim());
+        var storedToken = await _resetRepo.GetByVerifyTokenAsync(normalised, dto.VerifyToken.Trim());
 
-        if (storedToken is null || storedToken.IsUsed || storedToken.ExpiresAt < DateTime.UtcNow)
-            throw new InvalidOperationException("OTP không hợp lệ hoặc đã hết hạn.");
+        if (storedToken is null)
+            throw new InvalidOperationException("Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng xin OTP mới.");
 
         var user = storedToken.User
             ?? throw new KeyNotFoundException("Tài khoản không tồn tại.");
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword, workFactor: 12);
-        storedToken.IsUsed = true;
+        storedToken.IsCompleted = true;
         _userRepo.Update(user);
 
         var now = DateTime.UtcNow;
@@ -341,7 +359,7 @@ public sealed class AuthService : IAuthService
 
         await _resetRepo.SaveChangesAsync();
 
-        _logger.LogInformation("[ResetPassword] OK — UserId: {UserId}", user.Id);
+        _logger.LogInformation("[ResetPassword] OK → UserId: {UserId}", user.Id);
     }
 
     // ── RefreshTokenAsync ─────────────────────────────────────────────────────
@@ -368,7 +386,7 @@ public sealed class AuthService : IAuthService
             await _tokenRepo.SaveChangesAsync();
 
             _logger.LogCritical(
-                "⚠️ REPLAY ATTACK — UserId: {UserId}, Token: {Token}, {Time:O}",
+                "REPLAY ATTACK — UserId: {UserId}, Token: {Token}, {Time:O}",
                 storedToken.UserId, MaskToken(refreshToken), utcNow);
 
             throw new UnauthorizedAccessException("Token đã bị thu hồi — phiên đăng nhập bị chấm dứt.");
