@@ -12,6 +12,7 @@ public interface IAuthService
     Task RevokeTokenAsync(string refreshToken, Guid userId);
     Task ChangePasswordAsync(Guid userId, ChangePasswordDto dto);
     Task ForgotPasswordAsync(string email);
+    Task<VerifyOtpResponseDto> VerifyOtpAsync(string email, string otp);
     Task ResetPasswordAsync(ResetPasswordDto dto);
     string GenerateAccessToken(User user);
     RefreshToken GenerateRefreshToken();

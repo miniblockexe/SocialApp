@@ -103,7 +103,9 @@ internal sealed class PasswordResetTokenConfiguration : IEntityTypeConfiguration
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Token).IsRequired().HasMaxLength(6);
+        builder.Property(t => t.VerifyToken).HasMaxLength(256);
         builder.Property(t => t.IsUsed).HasDefaultValue(false);
+        builder.Property(t => t.IsCompleted).HasDefaultValue(false);
 
         builder.HasOne(t => t.User)
             .WithMany()
@@ -112,6 +114,11 @@ internal sealed class PasswordResetTokenConfiguration : IEntityTypeConfiguration
 
         builder.HasIndex(t => new { t.UserId, t.Token })
             .HasDatabaseName("IX_PasswordResetTokens_UserId_Token");
+
+        builder.HasIndex(t => t.VerifyToken)
+            .IsUnique()
+            .HasFilter("\"VerifyToken\" IS NOT NULL")
+            .HasDatabaseName("IX_PasswordResetTokens_VerifyToken");
     }
 }
 
