@@ -22,6 +22,7 @@ public sealed class UsersController : ControllerBase
 {
     private readonly IUserService _userService;
     private readonly IValidator<UpdateProfileDto> _updateProfileValidator;
+    private readonly IValidator<PrivacySettingsDto> _privacySettingsValidator;
     private readonly ILogger<UsersController> _logger;
 
     private const long AvatarMaxRequestBytes = 5 * 1024 * 1024;
@@ -31,10 +32,12 @@ public sealed class UsersController : ControllerBase
     public UsersController(
         IUserService userService,
         IValidator<UpdateProfileDto> updateProfileValidator,
+        IValidator<PrivacySettingsDto> privacySettingsValidator,
         ILogger<UsersController> logger)
     {
         _userService = userService;
         _updateProfileValidator = updateProfileValidator;
+        _privacySettingsValidator = privacySettingsValidator;
         _logger = logger;
     }
 
@@ -306,6 +309,72 @@ public sealed class UsersController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ApiResponse<string>.BadRequest(ex.Message));
+        }
+    }
+
+    /// <summary>Lấy cài đặt riêng tư hiện tại của user đang đăng nhập.</summary>
+    /// <response code="200">Trả về 4 field cài đặt riêng tư hiện tại.</response>
+    /// <response code="401">Chưa đăng nhập hoặc JWT không hợp lệ.</response>
+    /// <response code="404">Tài khoản không tồn tại.</response>
+    [HttpGet("me/privacy-settings")]
+    [EnableRateLimiting("default")]
+    [ProducesResponseType(typeof(ApiResponse<PrivacySettingsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPrivacySettings()
+    {
+        var userId = User.GetUserIdOrThrow();
+
+        try
+        {
+            var settings = await _userService.GetPrivacySettingsAsync(userId);
+            return Ok(ApiResponse<PrivacySettingsDto>.Ok(settings));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse<PrivacySettingsDto>.NotFound(ex.Message));
+        }
+    }
+
+    /// <summary>Cập nhật cài đặt riêng tư của user đang đăng nhập (ghi đè cả 4 field).</summary>
+    /// <param name="dto">Giá trị mới cho cả 4 field — Public / Friends / OnlyMe.</param>
+    /// <response code="200">Cập nhật thành công — trả về cài đặt mới.</response>
+    /// <response code="401">Chưa đăng nhập hoặc JWT không hợp lệ.</response>
+    /// <response code="404">Tài khoản không tồn tại.</response>
+    /// <response code="422">Dữ liệu đầu vào không hợp lệ (validation errors).</response>
+    [HttpPut("me/privacy-settings")]
+    [EnableRateLimiting("default")]
+    [ProducesResponseType(typeof(ApiResponse<PrivacySettingsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdatePrivacySettings([FromBody] PrivacySettingsDto? dto)
+    {
+        if (dto is null)
+            return UnprocessableEntity(ApiResponse<PrivacySettingsDto>.UnprocessableEntity(
+                new List<string> { "Body không được để trống." }));
+
+        var validation = await _privacySettingsValidator.ValidateAsync(dto);
+        if (!validation.IsValid)
+        {
+            var errors = validation.Errors.Select(e => e.ErrorMessage).ToList();
+            return UnprocessableEntity(ApiResponse<PrivacySettingsDto>.UnprocessableEntity(errors));
+        }
+
+        var userId = User.GetUserIdOrThrow();
+
+        try
+        {
+            var settings = await _userService.UpdatePrivacySettingsAsync(userId, dto);
+
+            _logger.LogInformation(
+                "[PUT /api/users/me/privacy-settings] Cập nhật thành công — UserId: {UserId}", userId);
+
+            return Ok(ApiResponse<PrivacySettingsDto>.Ok(settings, "Cập nhật cài đặt riêng tư thành công."));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse<PrivacySettingsDto>.NotFound(ex.Message));
         }
     }
 

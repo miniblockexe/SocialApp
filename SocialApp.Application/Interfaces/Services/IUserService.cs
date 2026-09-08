@@ -14,12 +14,26 @@ public interface IUserService
     /// <summary>
     /// Lấy profile đầy đủ của một user bất kỳ (theo góc nhìn của viewer).
     /// Tính FriendshipStatus, FriendCount, PostCount.
+    /// Nếu viewer không đủ quyền xem (theo ProfileVisibility của target) — KHÔNG throw,
+    /// vẫn trả 200 với Id/Username/FullName/AvatarUrl để FE render header, nhưng
+    /// IsRestricted = true và Bio/CoverPhotoUrl/RingtoneUrl/FriendCount/PostCount bị ẩn.
     /// </summary>
     /// <param name="targetId">Id của user cần xem profile.</param>
     /// <param name="viewerId">Id của user đang thực hiện request.</param>
-    /// <returns>UserProfileDto đầy đủ thông tin.</returns>
+    /// <returns>UserProfileDto — có thể là bản đầy đủ hoặc bản bị hạn chế (IsRestricted = true).</returns>
     /// <exception cref="KeyNotFoundException">404 — targetId không tồn tại.</exception>
     Task<UserProfileDto> GetProfileAsync(Guid targetId, Guid viewerId);
+
+    /// <summary>Lấy cài đặt riêng tư hiện tại của user đang đăng nhập.</summary>
+    /// <param name="userId">Id của user đang đăng nhập.</param>
+    /// <exception cref="KeyNotFoundException">404 — userId không tồn tại.</exception>
+    Task<PrivacySettingsDto> GetPrivacySettingsAsync(Guid userId);
+
+    /// <summary>Cập nhật cài đặt riêng tư của user đang đăng nhập (ghi đè toàn bộ 4 field).</summary>
+    /// <param name="userId">Id của user đang đăng nhập.</param>
+    /// <param name="dto">Giá trị mới cho cả 4 field.</param>
+    /// <exception cref="KeyNotFoundException">404 — userId không tồn tại.</exception>
+    Task<PrivacySettingsDto> UpdatePrivacySettingsAsync(Guid userId, PrivacySettingsDto dto);
 
     /// <summary>
     /// Lấy profile của chính user đang đăng nhập.

@@ -267,6 +267,12 @@ public sealed class PostService : IPostService
                     p.UserId == viewerId ||
                     p.Privacy == PostPrivacy.Public ||
                     (p.Privacy == PostPrivacy.Friends && isFriend)
+                ) &&
+                // Lớp lọc PostVisibility của tác giả — cộng thêm vào Privacy của từng bài ở trên.
+                (
+                    p.UserId == viewerId ||
+                    p.User.PostVisibility == PostPrivacy.Public ||
+                    (p.User.PostVisibility == PostPrivacy.Friends && isFriend)
                 ),
             orderBy: p => p.CreatedAt,
             ct: default,
