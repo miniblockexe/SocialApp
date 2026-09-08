@@ -99,6 +99,16 @@ public sealed class PostRepository : GenericRepository<Post>, IPostRepository
 
         query = query.Where(p =>
 
+            // Lớp lọc PostVisibility của TÁC GIẢ — áp dụng cho mọi bài (cá nhân lẫn group),
+            // cộng thêm vào các lớp lọc theo Privacy của từng bài + GroupPrivacy bên dưới.
+            // Chủ bài viết luôn thấy bài của chính mình bất kể PostVisibility.
+            (p.UserId == userId ||
+             p.User.PostVisibility == PostPrivacy.Public ||
+             (p.User.PostVisibility == PostPrivacy.Friends && friendIds.Contains(p.UserId)))
+
+            &&
+
+            (
             (p.GroupId == null &&
              (
                  p.UserId == userId ||
@@ -121,6 +131,7 @@ public sealed class PostRepository : GenericRepository<Post>, IPostRepository
 
                  memberGroupIdSet.Contains(p.GroupId)
              ))
+            )
         );
 
         var totalCount = await query.CountAsync(ct);

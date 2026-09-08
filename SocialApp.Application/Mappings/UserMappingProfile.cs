@@ -21,7 +21,11 @@ public sealed class UserMappingProfile : Profile
         CreateMap<User, UserProfileDto>()
             .ForMember(dest => dest.FriendCount, opt => opt.Ignore())
             .ForMember(dest => dest.PostCount, opt => opt.Ignore())
-            .ForMember(dest => dest.FriendshipStatus, opt => opt.Ignore());
+            .ForMember(dest => dest.FriendshipStatus, opt => opt.Ignore())
+            .ForMember(dest => dest.IsRestricted, opt => opt.Ignore());
+
+        // User → PrivacySettingsDto (đọc cài đặt hiện tại để trả về GET privacy-settings)
+        CreateMap<User, PrivacySettingsDto>();
 
         // User → UserSearchResultDto
         // Id, Username, FullName, AvatarUrl map theo convention.

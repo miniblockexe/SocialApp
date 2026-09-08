@@ -84,4 +84,21 @@ public class User : BaseAuditableEntity
 
     /// <summary>Object key trên R2 — dùng để xóa file cũ khi upload mới.</summary>
     public string? RingtoneKey { get; set; }
+
+    // ── Privacy settings ────────────────────────────────────────────────────
+
+    /// <summary>Ai được xem trang cá nhân (thông tin chi tiết) của user này.</summary>
+    public PostPrivacy ProfileVisibility { get; set; } = PostPrivacy.Public;
+
+    /// <summary>
+    /// Ai được xem bài đăng của user này (lớp lọc bổ sung, áp dụng cho TẤT CẢ bài viết
+    /// của user, cộng thêm vào Privacy của từng bài viết riêng lẻ và GroupPrivacy).
+    /// </summary>
+    public PostPrivacy PostVisibility { get; set; } = PostPrivacy.Public;
+
+    /// <summary>Ai được xem danh sách bạn bè của user này.</summary>
+    public PostPrivacy FriendListVisible { get; set; } = PostPrivacy.Public;
+
+    /// <summary>Ai được tìm thấy user này qua chức năng tìm kiếm.</summary>
+    public PostPrivacy SearchDiscoverable { get; set; } = PostPrivacy.Public;
 }

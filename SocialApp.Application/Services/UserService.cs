@@ -55,11 +55,73 @@ public sealed class UserService : IUserService
         if (targetId == Guid.Empty) throw new ArgumentException("targetId không hợp lệ.");
         var user = await _userRepo.GetByIdAsync(targetId)
             ?? throw new KeyNotFoundException($"Người dùng {targetId} không tồn tại.");
+
         var dto = _mapper.Map<UserProfileDto>(user);
+        dto.FriendshipStatus = await ComputeFriendshipStatusAsync(viewerId, targetId);
+
+        var isRestricted = await IsProfileRestrictedAsync(user, viewerId);
+        dto.IsRestricted = isRestricted;
+
+        if (isRestricted)
+        {
+            // Ẩn thông tin chi tiết — chỉ giữ Id/Username/FullName/AvatarUrl để FE render header.
+            dto.Bio = null;
+            dto.CoverPhotoUrl = null;
+            dto.RingtoneUrl = null;
+            dto.FriendCount = 0;
+            dto.PostCount = 0;
+            return dto;
+        }
+
         dto.FriendCount = await _friendRepo.CountFriendsAsync(targetId);
         dto.PostCount = await _postRepo.CountAsync(p => p.UserId == targetId);
-        dto.FriendshipStatus = await ComputeFriendshipStatusAsync(viewerId, targetId);
         return dto;
+    }
+
+    /// <summary>
+    /// Kiểm tra viewer có bị hạn chế xem chi tiết profile của user này không,
+    /// dựa trên ProfileVisibility mà chủ tài khoản đã cấu hình.
+    /// Chủ tài khoản tự xem mình → luôn không bị hạn chế.
+    /// </summary>
+    private async Task<bool> IsProfileRestrictedAsync(User user, Guid viewerId)
+    {
+        if (user.Id == viewerId) return false;
+
+        return user.ProfileVisibility switch
+        {
+            PostPrivacy.Public => false,
+            PostPrivacy.OnlyMe => true,
+            PostPrivacy.Friends => !await _friendRepo.AreFriendsAsync(viewerId, user.Id),
+            _ => false
+        };
+    }
+
+    public async Task<PrivacySettingsDto> GetPrivacySettingsAsync(Guid userId)
+    {
+        if (userId == Guid.Empty) throw new ArgumentException("userId không hợp lệ.");
+        var user = await _userRepo.GetByIdAsync(userId)
+            ?? throw new KeyNotFoundException($"Người dùng {userId} không tồn tại.");
+        return _mapper.Map<PrivacySettingsDto>(user);
+    }
+
+    public async Task<PrivacySettingsDto> UpdatePrivacySettingsAsync(Guid userId, PrivacySettingsDto dto)
+    {
+        if (userId == Guid.Empty) throw new ArgumentException("userId không hợp lệ.");
+        var user = await _userRepo.FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new KeyNotFoundException($"Người dùng {userId} không tồn tại.");
+
+        user.ProfileVisibility = dto.ProfileVisibility;
+        user.PostVisibility = dto.PostVisibility;
+        user.FriendListVisible = dto.FriendListVisible;
+        user.SearchDiscoverable = dto.SearchDiscoverable;
+
+        _userRepo.Update(user);
+        await _userRepo.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "[UserService] Privacy settings updated — UserId: {Id}", userId);
+
+        return _mapper.Map<PrivacySettingsDto>(user);
     }
 
     public async Task<UserProfileDto> GetMyProfileAsync(Guid userId)
@@ -159,15 +221,19 @@ public sealed class UserService : IUserService
         size = size < 1 ? 10 : size > 100 ? 100 : size;
         var keywordLower = keyword.ToLower();
         var blockedIds = await _friendRepo.GetBlockedUserIdsAsync(viewerId);
+        var friendIds = await _friendRepo.GetFriendIdsAsync(viewerId);
 
         // Paginate ở DB thay vì load toàn bộ vào memory
         // NOTE: mutual count không sort được ở DB level nên sort by FullName,
         // rồi re-sort in-memory sau khi có mutual counts (page-scope only).
+        // SearchDiscoverable: loại OnlyMe hoàn toàn; Friends chỉ giữ nếu đã là bạn với viewer.
         var baseQuery = _userRepo.Query()
             .Where(u =>
                 u.Id != viewerId &&
                 u.DeletedAt == null &&
                 !blockedIds.Contains(u.Id) &&
+                u.SearchDiscoverable != PostPrivacy.OnlyMe &&
+                (u.SearchDiscoverable == PostPrivacy.Public || friendIds.Contains(u.Id)) &&
                 (u.Username.ToLower().Contains(keywordLower) ||
                  u.FullName.ToLower().Contains(keywordLower)));
 
@@ -313,7 +379,7 @@ public sealed class UserService : IUserService
             "audio/ogg",
             "audio/wav", "audio/wave", "audio/x-wav", "audio/vnd.wave",
             "audio/mp4", "audio/x-m4a", "audio/aac",
-            "application/octet-stream", 
+            "application/octet-stream",
         ];
         if (!allowedAudio.Any(a => contentType.StartsWith(a, StringComparison.Ordinal)))
             throw new ArgumentException("Chỉ chấp nhận file audio: mp3, ogg, wav, m4a.");

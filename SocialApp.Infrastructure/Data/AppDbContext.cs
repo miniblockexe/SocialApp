@@ -143,6 +143,11 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.IsActive).HasDefaultValue(true);
         builder.Property(u => u.IsBanned).HasDefaultValue(false);
 
+        builder.Property(u => u.ProfileVisibility).HasConversion<int>().HasDefaultValue(PostPrivacy.Public);
+        builder.Property(u => u.PostVisibility).HasConversion<int>().HasDefaultValue(PostPrivacy.Public);
+        builder.Property(u => u.FriendListVisible).HasConversion<int>().HasDefaultValue(PostPrivacy.Public);
+        builder.Property(u => u.SearchDiscoverable).HasConversion<int>().HasDefaultValue(PostPrivacy.Public);
+
         builder.HasIndex(u => u.Email).IsUnique().HasDatabaseName("IX_Users_Email");
         builder.HasIndex(u => u.Username).IsUnique().HasDatabaseName("IX_Users_Username");
         builder.HasIndex(u => u.LastSeen).HasDatabaseName("IX_Users_LastSeen");
