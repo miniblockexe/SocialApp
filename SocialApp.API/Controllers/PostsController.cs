@@ -405,6 +405,41 @@ public sealed class PostsController : ControllerBase
     /// <summary>Trả về share link của bài viết (backend /share/{id} — tự phục vụ OG preview).</summary>
     /// <response code="200">Trả về share URL.</response>
     /// <response code="404">Bài đăng không tồn tại.</response>
+    /// <summary>Tìm kiếm bài đăng theo từ khóa. Chỉ trả về bài Public.</summary>
+    /// <param name="q">Từ khóa tìm kiếm (tối thiểu 2 ký tự).</param>
+    /// <param name="type">Lọc loại media: all | image | video (mặc định all).</param>
+    /// <param name="page">Trang hiện tại (mặc định 1).</param>
+    /// <param name="size">Số kết quả mỗi trang (mặc định 10, tối đa 50).</param>
+    /// <response code="200">Danh sách bài đăng phân trang.</response>
+    /// <response code="400">Từ khóa ngắn hơn 2 ký tự.</response>
+    [HttpGet("search")]
+    [EnableRateLimiting("default")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<PostResponseDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SearchPosts(
+        [FromQuery] string? q,
+        [FromQuery] string type = "all",
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 10)
+    {
+        var viewerId = User.GetUserIdOrThrow();
+        try
+        {
+            var result = await _postService.SearchPostsAsync(viewerId, q ?? string.Empty, type, page, size);
+            return Ok(ApiResponse<PagedResult<PostResponseDto>>.Ok(result));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ApiResponse<object>.BadRequest(ex.Message));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SearchPosts thất bại. q={Q} type={Type}", q, type);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                ApiResponse<object>.InternalServerError());
+        }
+    }
+
     [HttpGet("{id:guid}/share")]
     [EnableRateLimiting("default")]
     [ProducesResponseType(typeof(ApiResponse<ShareUrlDto>), StatusCodes.Status200OK)]

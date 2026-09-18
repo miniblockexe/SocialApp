@@ -739,4 +739,47 @@ public sealed class PostService : IPostService
         await _notificationRepo.AddAsync(notification);
         await _notificationRepo.SaveChangesAsync();
     }
+
+    // ─── Search Posts ────────────────────────────────────────────────────────
+    public async Task<PagedResult<PostResponseDto>> SearchPostsAsync(
+        Guid viewerId, string keyword, string mediaFilter, int page, int size)
+    {
+        keyword = keyword?.Trim() ?? string.Empty;
+        if (keyword.Length < 2)
+            throw new ArgumentException("Từ khóa phải có ít nhất 2 ký tự.");
+
+        page = page < 1 ? 1 : page;
+        size = size < 1 ? 10 : size > 50 ? 50 : size;
+        mediaFilter = (mediaFilter ?? "all").ToLower();
+
+        var blockedIds = await _friendRepo.GetBlockedUserIdsAsync(viewerId);
+        var keywordLower = keyword.ToLower();
+
+        var query = _postRepo.Query()
+            .Where(p =>
+                p.DeletedAt == null &&
+                p.Privacy == PostPrivacy.Public &&
+                !blockedIds.Contains(p.UserId) &&
+                (p.Content != null && p.Content.ToLower().Contains(keywordLower) ||
+                 p.User.FullName.ToLower().Contains(keywordLower) ||
+                 p.User.Username.ToLower().Contains(keywordLower)) &&
+                (mediaFilter == "all" ||
+                 (mediaFilter == "image" && p.PostMediaFiles.Any(m => m.MediaType == MediaType.Image)) ||
+                 (mediaFilter == "video" && p.PostMediaFiles.Any(m => m.MediaType == MediaType.Video))))
+            .Include(p => p.User)
+            .Include(p => p.PostMediaFiles)
+            .Include(p => p.Group);
+
+        var totalCount = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(p => p.CreatedAt)
+            .Skip((page - 1) * size)
+            .Take(size)
+            .ToListAsync();
+
+        var result = PagedResult<Post>.Create(items, totalCount, page, size);
+
+        var dtos = await BuildPostResponsesAsync(result.Items, viewerId);
+        return PagedResult<PostResponseDto>.Create(dtos, totalCount, page, size);
+    }
 }
