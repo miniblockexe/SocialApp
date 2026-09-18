@@ -746,7 +746,7 @@ public sealed class PostService : IPostService
         await _notificationRepo.SaveChangesAsync();
     }
 
-    // ─── Search Posts ────────────────────────────────────────────────────────
+    // ─── Search Posts ─────────────────────────────────────────────────────
     public async Task<PagedResult<PostResponseDto>> SearchPostsAsync(
         Guid viewerId, string keyword, string mediaFilter, int page, int size)
     {
@@ -759,33 +759,37 @@ public sealed class PostService : IPostService
         mediaFilter = (mediaFilter ?? "all").ToLower();
 
         var blockedIds = await _friendRepo.GetBlockedUserIdsAsync(viewerId);
-        var keywordLower = keyword.ToLower();
+        var kw = keyword.ToLower();
 
-        var query = _postRepo.Query()
-            .Where(p =>
-                p.DeletedAt == null &&
-                p.Privacy == PostPrivacy.Public &&
-                !blockedIds.Contains(p.UserId) &&
-                (p.Content != null && p.Content.ToLower().Contains(keywordLower) ||
-                 p.User.FullName.ToLower().Contains(keywordLower) ||
-                 p.User.Username.ToLower().Contains(keywordLower)) &&
-                (mediaFilter == "all" ||
-                 (mediaFilter == "image" && p.PostMediaFiles.Any(m => m.MediaType == MediaType.Image)) ||
-                 (mediaFilter == "video" && p.PostMediaFiles.Any(m => m.MediaType == MediaType.Video))))
+        // Include TRƯỚC Where để EF Core dịch sang SQL chính xác
+        var baseQuery = _postRepo.Query()
             .Include(p => p.User)
             .Include(p => p.PostMediaFiles)
-            .Include(p => p.Group);
+            .Include(p => p.Group)
+            .Where(p =>
+                p.Privacy == PostPrivacy.Public &&
+                p.DeletedAt == null &&
+                !blockedIds.Contains(p.UserId) &&
+                ((p.Content != null && p.Content.ToLower().Contains(kw)) ||
+                  p.User.FullName.ToLower().Contains(kw) ||
+                  p.User.Username.ToLower().Contains(kw)));
 
-        var totalCount = await query.CountAsync();
-        var items = await query
+        // Tách media filter thành Where riêng — expression tree đơn giản hơn
+        if (mediaFilter == "image")
+            baseQuery = baseQuery.Where(p =>
+                p.PostMediaFiles.Any(m => m.MediaType == MediaType.Image));
+        else if (mediaFilter == "video")
+            baseQuery = baseQuery.Where(p =>
+                p.PostMediaFiles.Any(m => m.MediaType == MediaType.Video));
+
+        var totalCount = await baseQuery.CountAsync();
+        var items = await baseQuery
             .OrderByDescending(p => p.CreatedAt)
             .Skip((page - 1) * size)
             .Take(size)
             .ToListAsync();
 
-        var result = PagedResult<Post>.Create(items, totalCount, page, size);
-
-        var dtos = await BuildPostResponsesAsync(result.Items, viewerId);
+        var dtos = await BuildPostResponsesAsync(items.AsReadOnly(), viewerId);
         return PagedResult<PostResponseDto>.Create(dtos, totalCount, page, size);
     }
 }

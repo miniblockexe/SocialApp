@@ -140,5 +140,5 @@ public interface IPostService
     /// Chỉ trả về bài Public. Hỗ trợ lọc media: all | image | video.
     /// </summary>
     Task<PagedResult<PostResponseDto>> SearchPostsAsync(
-        Guid viewerId, string keyword, string mediaFilter, int page, int size);
+       Guid viewerId, string keyword, string mediaFilter, int page, int size);
 }

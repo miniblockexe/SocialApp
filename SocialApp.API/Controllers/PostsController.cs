@@ -412,10 +412,10 @@ public sealed class PostsController : ControllerBase
     /// <param name="size">Số kết quả mỗi trang (mặc định 10, tối đa 50).</param>
     /// <response code="200">Danh sách bài đăng phân trang.</response>
     /// <response code="400">Từ khóa ngắn hơn 2 ký tự.</response>
+    /// <summary>Tìm kiếm bài đăng công khai theo từ khóa.</summary>
     [HttpGet("search")]
     [EnableRateLimiting("default")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<PostResponseDto>>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> SearchPosts(
         [FromQuery] string? q,
         [FromQuery] string type = "all",
@@ -425,7 +425,8 @@ public sealed class PostsController : ControllerBase
         var viewerId = User.GetUserIdOrThrow();
         try
         {
-            var result = await _postService.SearchPostsAsync(viewerId, q ?? string.Empty, type, page, size);
+            var result = await _postService.SearchPostsAsync(
+                viewerId, q ?? string.Empty, type, page, size);
             return Ok(ApiResponse<PagedResult<PostResponseDto>>.Ok(result));
         }
         catch (ArgumentException ex)
@@ -434,9 +435,8 @@ public sealed class PostsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "SearchPosts thất bại. q={Q} type={Type}", q, type);
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                ApiResponse<object>.InternalServerError());
+            _logger.LogError(ex, "SearchPosts lỗi. q={Q} type={Type}", q, type);
+            return StatusCode(500, ApiResponse<object>.InternalServerError());
         }
     }
 
