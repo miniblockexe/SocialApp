@@ -134,4 +134,11 @@ public interface IPostService
     /// <exception cref="ForbiddenException">403 — không đủ quyền xem bài gốc.</exception>
     /// <exception cref="InvalidOperationException">400 — share bài đã là share (chain không cho phép).</exception>
     Task<PostResponseDto> SharePostAsync(Guid userId, Guid originalPostId, SharePostRequestDto dto);
+
+    /// <summary>
+    /// Tìm kiếm bài đăng theo từ khóa (nội dung hoặc tên tác giả).
+    /// Chỉ trả về bài Public. Hỗ trợ lọc media: all | image | video.
+    /// </summary>
+    Task<PagedResult<PostResponseDto>> SearchPostsAsync(
+        Guid viewerId, string keyword, string mediaFilter, int page, int size);
 }
