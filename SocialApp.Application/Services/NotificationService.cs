@@ -225,6 +225,33 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task ResolveFriendRequestNotificationAsync(Guid receiverId, Guid requestId, bool accepted)
+    {
+        try
+        {
+            if (accepted)
+            {
+                // Đổi FriendRequest → FriendAccepted để trang Thông báo không hiện lại nút action
+                await _notificationRepo.UpdateTypeByEntityAsync(
+                    receiverId, requestId,
+                    NotificationType.FriendRequest, NotificationType.FriendAccepted);
+            }
+            else
+            {
+                // Xóa notification — người dùng đã từ chối, không cần hiện lại
+                await _notificationRepo.DeleteByEntityAsync(
+                    receiverId, requestId, NotificationType.FriendRequest);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Non-critical: lỗi chỉ log, không ảnh hưởng luồng accept/reject chính
+            _logger.LogWarning(ex,
+                "ResolveFriendRequestNotification thất bại. ReceiverId={ReceiverId}, RequestId={RequestId}, Accepted={Accepted}",
+                receiverId, requestId, accepted);
+        }
+    }
+
     public async Task DeleteNotificationAsync(Guid userId, Guid notificationId)
     {
         if (notificationId == Guid.Empty)

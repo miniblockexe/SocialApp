@@ -53,4 +53,6 @@ public interface INotificationService
     /// Xóa một notification. Chỉ owner mới được xóa.
     /// </summary>
     Task DeleteNotificationAsync(Guid userId, Guid notificationId);
+
+    Task ResolveFriendRequestNotificationAsync(Guid receiverId, Guid requestId, bool accepted);
 }

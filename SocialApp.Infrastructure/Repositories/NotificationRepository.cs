@@ -108,4 +108,32 @@ public sealed class NotificationRepository : INotificationRepository
     {
         return await _context.SaveChangesAsync(ct);
     }
+
+    public async Task<int> UpdateTypeByEntityAsync(
+        Guid userId,
+        Guid entityId,
+        NotificationType fromType,
+        NotificationType toType,
+        CancellationToken ct = default)
+    {
+        return await _context.Notifications
+            .Where(n => n.UserId == userId
+                     && n.EntityId == entityId
+                     && n.Type == fromType)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(n => n.Type, toType), ct);
+    }
+
+    public async Task<int> DeleteByEntityAsync(
+        Guid userId,
+        Guid entityId,
+        NotificationType type,
+        CancellationToken ct = default)
+    {
+        return await _context.Notifications
+            .Where(n => n.UserId == userId
+                     && n.EntityId == entityId
+                     && n.Type == type)
+            .ExecuteDeleteAsync(ct);
+    }
 }
