@@ -1,4 +1,5 @@
 ﻿using SocialApp.Domain.Entities;
+using SocialApp.Domain.Enums;
 
 namespace SocialApp.Application.Interfaces.Repositories;
 
@@ -58,4 +59,27 @@ public interface INotificationRepository
 
     /// <summary>Lưu thay đổi xuống DB.</summary>
     Task<int> SaveChangesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Bulk-update Type của notification: tìm theo (userId, entityId, fromType) rồi đổi sang toType.
+    /// Dùng sau khi chấp nhận lời mời kết bạn để notification không hiện lại nút action.
+    /// Trả số bản ghi bị ảnh hưởng.
+    /// </summary>
+    Task<int> UpdateTypeByEntityAsync(
+        Guid userId,
+        Guid entityId,
+        NotificationType fromType,
+        NotificationType toType,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Hard-delete notifications theo (userId, entityId, type).
+    /// Dùng sau khi từ chối lời mời kết bạn để notification không hiện lại sau khi reload.
+    /// Trả số bản ghi bị xóa.
+    /// </summary>
+    Task<int> DeleteByEntityAsync(
+        Guid userId,
+        Guid entityId,
+        NotificationType type,
+        CancellationToken ct = default);
 }

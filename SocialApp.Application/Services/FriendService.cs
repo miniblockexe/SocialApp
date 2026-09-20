@@ -230,6 +230,8 @@ public sealed class FriendService : IFriendService
             type: NotificationType.FriendAccepted,
             entityId: request.Id,
             content: $"{request.Receiver.FullName} đã chấp nhận lời mời kết bạn.");
+        await _notificationService.ResolveFriendRequestNotificationAsync(
+            receiverId: userId, requestId: request.Id, accepted: true);
 
         _logger.LogInformation(
             "Friend request accepted: RequestId={RequestId}, AcceptedBy={UserId}",
@@ -263,6 +265,11 @@ public sealed class FriendService : IFriendService
         await _friendRepo.SaveChangesAsync();
 
         // KHÔNG tạo notification — tránh lộ thông tin người gửi bị từ chối
+
+        // Xóa notification FriendRequest của receiver khỏi DB
+        // để không hiện lại nút action sau khi reload (nhất quán với UI đã remove item khỏi list)
+        await _notificationService.ResolveFriendRequestNotificationAsync(
+            receiverId: userId, requestId: request.Id, accepted: false);
 
         _logger.LogInformation(
             "Friend request rejected: RequestId={RequestId}, RejectedBy={UserId}",
