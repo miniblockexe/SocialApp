@@ -129,6 +129,11 @@ public sealed class MessageService : IMessageService
 
             await _db.SaveChangesAsync();
 
+            await _chatHub.NotifyUsersToRejoinAsync(
+                conversation.Id,
+                new[] { userId, targetId } 
+            );
+
             _logger.LogInformation(
                 "Tạo conversation 1-1: ConvId={ConvId}, User={UserId}, Target={TargetId}",
                 conversation.Id, userId, targetId);
@@ -176,6 +181,11 @@ public sealed class MessageService : IMessageService
             );
 
             await _db.SaveChangesAsync();
+
+            await _chatHub.NotifyUsersToRejoinAsync(
+                conversation.Id,
+                allMemberIds 
+            );
 
             _logger.LogInformation(
                 "Tạo group conversation: ConvId={ConvId}, Creator={UserId}, Members={Count}",
