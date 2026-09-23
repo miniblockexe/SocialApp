@@ -39,4 +39,22 @@ public sealed class ChatHubService : IChatHub
                 conversationId, message.Id);
         }
     }
+    public async Task AddUsersToConversationGroupAsync(Guid conversationId, IEnumerable<Guid> userIds)
+    {
+        foreach (var userId in userIds)
+        {
+            await _hubContext.Clients
+                .Group($"user_{userId}")
+                .SendAsync("JoinConversationGroup", new { conversationId });
+        }
+    }
+    public async Task NotifyUsersToRejoinAsync(Guid conversationId, IEnumerable<Guid> userIds)
+    {
+        foreach (var userId in userIds)
+        {
+            await _hubContext.Clients
+                .Group($"user_{userId}")
+                .SendAsync("JoinConversationGroup", new { conversationId });
+        }
+    }
 }

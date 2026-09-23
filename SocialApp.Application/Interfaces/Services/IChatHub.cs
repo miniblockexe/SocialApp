@@ -15,4 +15,11 @@ public interface IChatHub
     /// Event: ReceiveMessage.
     /// </summary>
     Task SendMessageAsync(Guid conversationId, MessageDto message);
+    /// <summary>
+    /// Add tất cả connection của user vào conversation group.
+    /// Gọi sau khi tạo conversation mới để user online nhận được ReceiveMessage.
+    /// Event: JoinConversationGroup (client tự xử lý).
+    /// </summary>
+    Task AddUsersToConversationGroupAsync(Guid conversationId, IEnumerable<Guid> userIds);
+    Task NotifyUsersToRejoinAsync(Guid conversationId, IEnumerable<Guid> userIds);
 }
