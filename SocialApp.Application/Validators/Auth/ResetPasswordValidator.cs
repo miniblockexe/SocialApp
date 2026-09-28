@@ -16,8 +16,11 @@ public sealed class ResetPasswordValidator : AbstractValidator<ResetPasswordDto>
         RuleFor(x => x.NewPassword)
             .NotEmpty().WithMessage("Mật khẩu mới không được để trống.")
             .MinimumLength(8).WithMessage("Mật khẩu tối thiểu 8 ký tự.")
+            .MaximumLength(128).WithMessage("Mật khẩu không được vượt quá 128 ký tự.")
             .Matches("[A-Z]").WithMessage("Mật khẩu phải có ít nhất 1 chữ hoa.")
-            .Matches("[0-9]").WithMessage("Mật khẩu phải có ít nhất 1 chữ số.");
+            .Matches("[a-z]").WithMessage("Mật khẩu phải có ít nhất 1 chữ thường.")
+            .Matches("[0-9]").WithMessage("Mật khẩu phải có ít nhất 1 chữ số.")
+            .Matches("[^a-zA-Z0-9]").WithMessage("Mật khẩu phải có ít nhất 1 ký tự đặc biệt.");
 
         RuleFor(x => x.ConfirmNewPassword)
             .Equal(x => x.NewPassword).WithMessage("Mật khẩu xác nhận không khớp.");
