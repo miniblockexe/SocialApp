@@ -283,6 +283,50 @@ public sealed class AuthController : ControllerBase
         }
     }
 
+    /// <summary>Email + trạng thái đã có mật khẩu của chính user (FE dùng để chọn form đổi/đặt mật khẩu).</summary>
+    [HttpGet("security-info")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<AccountSecurityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSecurityInfo()
+    {
+        var userId = User.GetUserIdOrThrow();
+
+        try
+        {
+            var result = await _authService.GetSecurityInfoAsync(userId);
+            return Ok(ApiResponse<AccountSecurityDto>.Ok(result));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse.NotFound(ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Gửi OTP tới email của user đang đăng nhập để đặt/đổi mật khẩu mà không cần mật khẩu cũ
+    /// (tài khoản Google, hoặc quên mật khẩu hiện tại). Tiếp theo dùng verify-otp → reset-password.
+    /// </summary>
+    [HttpPost("send-set-password-otp")]
+    [Authorize]
+    [EnableRateLimiting("register")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SendSetPasswordOtp()
+    {
+        var userId = User.GetUserIdOrThrow();
+
+        try
+        {
+            await _authService.SendSetPasswordOtpAsync(userId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse.NotFound(ex.Message));
+        }
+    }
+
     /// <summary>Đổi mật khẩu và force logout toàn bộ thiết bị.</summary>
     [HttpPut("change-password")]
     [Authorize]
@@ -318,6 +362,11 @@ public sealed class AuthController : ControllerBase
         catch (KeyNotFoundException ex)
         {
             return NotFound(ApiResponse.NotFound(ex.Message));
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NO_PASSWORD_SET")
+        {
+            return BadRequest(ApiResponse.BadRequest(
+                "Tài khoản chưa có mật khẩu. Vui lòng dùng mã OTP gửi qua email để đặt mật khẩu."));
         }
         catch (InvalidOperationException ex) when (ex.Message == "OLD_PASSWORD_WRONG")
         {

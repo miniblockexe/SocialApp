@@ -171,7 +171,10 @@ public sealed class AuthService : IAuthService
             throw new UnauthorizedAccessException("Email hoặc mật khẩu không đúng.");
         }
 
-        if (!BCrypt.Net.BCrypt.Verify(dto.Password, userReadOnly.PasswordHash))
+        // Tài khoản Google chưa đặt mật khẩu: PasswordHash rỗng → BCrypt.Verify sẽ ném exception.
+        // Trả lỗi chung như sai mật khẩu để không lộ loại tài khoản.
+        if (string.IsNullOrEmpty(userReadOnly.PasswordHash) ||
+            !BCrypt.Net.BCrypt.Verify(dto.Password, userReadOnly.PasswordHash))
         {
             IncrementLoginAttempt(cacheKey);
             _logger.LogWarning("[Login] Sai mật khẩu — UserId: {UserId}, IP: {IP}", userReadOnly.Id, ipAddress);
@@ -294,21 +297,39 @@ public sealed class AuthService : IAuthService
 
         if (user is null) return;
 
-        await _resetRepo.DeleteAllForUserAsync(user.Id);
-
-        var token = new PasswordResetToken
-        {
-            UserId = user.Id,
-            Token = GenerateOtp(),
-            ExpiresAt = DateTime.UtcNow.Add(OtpTtl)
-        };
-
-        await _resetRepo.AddAsync(token);
-        await _resetRepo.SaveChangesAsync();
-
-        await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, token.Token);
+        await IssueOtpAsync(user);
 
         _logger.LogInformation("[ForgotPassword] OTP gửi → UserId: {UserId}", user.Id);
+    }
+
+    // ── SendSetPasswordOtpAsync ───────────────────────────────────────────────
+
+    /// <summary>
+    /// User đã đăng nhập (vd. tài khoản Google chưa có mật khẩu) xin OTP qua email của chính mình
+    /// để đặt mật khẩu. Sau đó dùng chung verify-otp và reset-password.
+    /// </summary>
+    public async Task SendSetPasswordOtpAsync(Guid userId)
+    {
+        var user = await _userRepo.GetByIdAsync(userId)
+            ?? throw new KeyNotFoundException("Không tìm thấy người dùng.");
+
+        await IssueOtpAsync(user);
+
+        _logger.LogInformation("[SetPasswordOtp] OTP gửi → UserId: {UserId}", user.Id);
+    }
+
+    // ── GetSecurityInfoAsync ──────────────────────────────────────────────────
+
+    public async Task<AccountSecurityDto> GetSecurityInfoAsync(Guid userId)
+    {
+        var user = await _userRepo.GetByIdAsync(userId)
+            ?? throw new KeyNotFoundException("Không tìm thấy người dùng.");
+
+        return new AccountSecurityDto
+        {
+            Email = user.Email,
+            HasPassword = !string.IsNullOrEmpty(user.PasswordHash)
+        };
     }
 
     public async Task<VerifyOtpResponseDto> VerifyOtpAsync(string email, string otp)
@@ -474,6 +495,10 @@ public sealed class AuthService : IAuthService
             throw new KeyNotFoundException("Không tìm thấy người dùng.");
         }
 
+        // Tài khoản Google chưa có mật khẩu → phải dùng luồng OTP, không có "mật khẩu cũ" để so.
+        if (string.IsNullOrEmpty(user.PasswordHash))
+            throw new InvalidOperationException("NO_PASSWORD_SET");
+
         if (dto.NewPassword == dto.OldPassword)
             throw new InvalidOperationException("NEW_PASSWORD_SAME_AS_OLD");
 
@@ -551,6 +576,24 @@ public sealed class AuthService : IAuthService
             ExpiresAt = expiresAt,
             User = _mapper.Map<UserBriefDto>(user)
         };
+    }
+
+    /// <summary>Xoá OTP cũ, tạo OTP mới, lưu DB và gửi email.</summary>
+    private async Task IssueOtpAsync(User user)
+    {
+        await _resetRepo.DeleteAllForUserAsync(user.Id);
+
+        var token = new PasswordResetToken
+        {
+            UserId = user.Id,
+            Token = GenerateOtp(),
+            ExpiresAt = DateTime.UtcNow.Add(OtpTtl)
+        };
+
+        await _resetRepo.AddAsync(token);
+        await _resetRepo.SaveChangesAsync();
+
+        await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, token.Token);
     }
 
     private static string GenerateOtp()
