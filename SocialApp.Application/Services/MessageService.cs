@@ -790,7 +790,7 @@ public sealed class MessageService : IMessageService
                 Username = m.Sender.Username,
                 FullName = m.Sender.FullName,
                 AvatarUrl = m.Sender.AvatarUrl,
-                Role = m.Sender.Role
+                Role = m.Sender.Role 
             },
             SeenByUserIds = m.SeenBy.Select(s => s.UserId).ToList()
         };
