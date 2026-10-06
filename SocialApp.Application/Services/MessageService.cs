@@ -696,17 +696,16 @@ public sealed class MessageService : IMessageService
     private async Task<ConversationDto> BuildConversationDtoAsync(
         Conversation conv, Guid userId)
     {
-        List<ConversationParticipant> participants;
-        if (conv.Participants.Count == 0)
+        var participants = conv.Participants.ToList();
+
+        // Conversation vừa tạo: EF fix-up đã gắn participant vào conv.Participants nhưng p.User chưa được load
+        // (khiến Participants trả về null). Thiếu User ở bất kỳ participant nào thì nạp lại kèm User.
+        if (participants.Count == 0 || participants.Any(p => p.User == null))
         {
             participants = await _db.ConversationParticipants
                 .Include(p => p.User)
                 .Where(p => p.ConversationId == conv.Id)
                 .ToListAsync();
-        }
-        else
-        {
-            participants = conv.Participants.ToList();
         }
 
         var lastMessage = await _db.Messages

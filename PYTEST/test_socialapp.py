@@ -17,7 +17,7 @@ import pytest
 import requests
 
 # CONFIG
-BASE_URL       = "http://localhost:5290/api"
+BASE_URL       = "https://socialapp.trantamttkmini.workers.dev/api"
 ADMIN_EMAIL    = "admin@socialapp.com"
 ADMIN_PASSWORD = "Admin@123456"
 

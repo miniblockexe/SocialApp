@@ -27,7 +27,7 @@ public sealed class PostService : IPostService
     private readonly IPostRepository _postRepo;
     private readonly IGenericRepository<Comment> _commentRepo;
     private readonly ILikeRepository _likeRepo;
-    private readonly INotificationRepository _notificationRepo;
+    private readonly INotificationService _notificationService;
     private readonly IFriendRequestRepository _friendRepo;
     private readonly IGroupRepository _groupRepo;
     private readonly ICloudService _cloudService;
@@ -43,7 +43,7 @@ public sealed class PostService : IPostService
         IPostRepository postRepo,
         IGenericRepository<Comment> commentRepo,
         ILikeRepository likeRepo,
-        INotificationRepository notificationRepo,
+        INotificationService notificationService,
         IFriendRequestRepository friendRepo,
         IGroupRepository groupRepo,
         ICloudService cloudService,
@@ -56,7 +56,7 @@ public sealed class PostService : IPostService
         _postRepo = postRepo;
         _commentRepo = commentRepo;
         _likeRepo = likeRepo;
-        _notificationRepo = notificationRepo;
+        _notificationService = notificationService;
         _friendRepo = friendRepo;
         _groupRepo = groupRepo;
         _cloudService = cloudService;
@@ -330,7 +330,7 @@ public sealed class PostService : IPostService
 
         if (userId != post.UserId)
         {
-            await CreateNotificationAsync(
+            await _notificationService.CreateNotificationAsync(
                 recipientId: post.UserId,
                 actorId: userId,
                 type: NotificationType.Like,
@@ -420,7 +420,7 @@ public sealed class PostService : IPostService
         var recipientId = parent?.UserId ?? post.UserId;
         if (recipientId != userId)
         {
-            await CreateNotificationAsync(
+            await _notificationService.CreateNotificationAsync(
                 recipientId: recipientId,
                 actorId: userId,
                 type: NotificationType.Comment,
@@ -593,7 +593,7 @@ public sealed class PostService : IPostService
 
         if (userId != originalPost.UserId)
         {
-            await CreateNotificationAsync(
+            await _notificationService.CreateNotificationAsync(
                 recipientId: originalPost.UserId,
                 actorId: userId,
                 type: NotificationType.Share,
@@ -728,22 +728,6 @@ public sealed class PostService : IPostService
             result.FileSize,
             result.MediaType,
             result.StorageProvider);
-    }
-
-    private async Task CreateNotificationAsync(
-        Guid recipientId, Guid actorId, NotificationType type, Guid entityId, string content)
-    {
-        var notification = new Notification
-        {
-            UserId = recipientId,
-            ActorId = actorId,
-            Type = type,
-            EntityId = entityId,
-            Content = content
-        };
-
-        await _notificationRepo.AddAsync(notification);
-        await _notificationRepo.SaveChangesAsync();
     }
 
     // ─── Search Posts ─────────────────────────────────────────────────────
