@@ -114,8 +114,22 @@ public sealed class NotificationService : INotificationService
             var actor = await _userRepo.GetByIdAsync(actorId);
             if (actor is null) return;
 
-            notification.Actor = actor;
-            var notificationDto = MapToDto(notification);
+            // Không gán Actor lên entity đang được track: lần SaveChanges kế tiếp trong cùng request
+            // (ví dụ gửi chéo lời mời kết bạn tạo 2 notification liên tiếp) sẽ báo lỗi
+            // "cannot be tracked" vì User đó đã được track sẵn. Dùng bản sao detached chỉ để map DTO.
+            var pushModel = new Notification
+            {
+                Id = notification.Id,
+                UserId = notification.UserId,
+                ActorId = notification.ActorId,
+                Type = notification.Type,
+                EntityId = notification.EntityId,
+                Content = notification.Content,
+                IsRead = notification.IsRead,
+                CreatedAt = notification.CreatedAt,
+                Actor = actor
+            };
+            var notificationDto = MapToDto(pushModel);
 
             await _notificationHub.SendNotificationAsync(recipientId, notificationDto);
 

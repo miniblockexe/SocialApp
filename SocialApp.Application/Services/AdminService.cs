@@ -245,12 +245,10 @@ public sealed class AdminService : IAdminService
             ? query.SortBy!.ToLower()
             : "createdAt";
 
-        var q = _db.Users
-            .Include(u => u.Posts)
-            .Include(u => u.SentFriendRequests)
-            .Include(u => u.ReceivedFriendRequests)
-            .Include(u => u.SentMessages)
-            .AsQueryable();
+        // Không Include các collection lớn (Posts/FriendRequests/SentMessages): nạp toàn bộ chỉ để đếm
+        // làm câu SQL nổ tích (cartesian) và trả 500/timeout khi user có nhiều dữ liệu.
+        // Các số đếm được tính bằng subquery trong phần Select bên dưới.
+        var q = _db.Users.AsQueryable();
 
         if (query.IsBanned.HasValue)
             q = q.Where(u => u.IsBanned == query.IsBanned.Value);
@@ -278,30 +276,29 @@ public sealed class AdminService : IAdminService
         };
 
         var totalCount = await q.CountAsync();
-        var users = await q
+        var items = await q
             .Skip((page - 1) * size)
             .Take(size)
+            .Select(u => new AdminUserDto
+            {
+                Id = u.Id,
+                Username = u.Username,
+                Email = u.Email,
+                FullName = u.FullName,
+                AvatarUrl = u.AvatarUrl,
+                Role = u.Role,
+                IsActive = u.IsActive,
+                IsBanned = u.IsBanned,
+                BannedReason = u.BannedReason,
+                CreatedAt = u.CreatedAt,
+                LastSeen = u.LastSeen,
+                PostCount = u.Posts.Count(p => p.DeletedAt == null),
+                FriendCount = u.SentFriendRequests.Count(f => f.Status == FriendStatus.Accepted)
+                             + u.ReceivedFriendRequests.Count(f => f.Status == FriendStatus.Accepted),
+                MessageCount = u.SentMessages.Count()
+                // PasswordHash KHÔNG được map trong bất kỳ trường hợp nào
+            })
             .ToListAsync();
-
-        var items = users.Select(u => new AdminUserDto
-        {
-            Id = u.Id,
-            Username = u.Username,
-            Email = u.Email,
-            FullName = u.FullName,
-            AvatarUrl = u.AvatarUrl,
-            Role = u.Role,
-            IsActive = u.IsActive,
-            IsBanned = u.IsBanned,
-            BannedReason = u.BannedReason,
-            CreatedAt = u.CreatedAt,
-            LastSeen = u.LastSeen,
-            PostCount = u.Posts.Count(p => p.DeletedAt == null),
-            FriendCount = u.SentFriendRequests.Count(f => f.Status == FriendStatus.Accepted)
-                         + u.ReceivedFriendRequests.Count(f => f.Status == FriendStatus.Accepted),
-            MessageCount = u.SentMessages.Count
-            // PasswordHash KHÔNG được map trong bất kỳ trường hợp nào
-        }).ToList();
 
         return PagedResult<AdminUserDto>.Create(items, totalCount, page, size);
     }
