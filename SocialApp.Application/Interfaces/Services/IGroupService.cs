@@ -20,6 +20,7 @@ public interface IGroupService
     Task LeaveGroupAsync(Guid userId, Guid groupId, CancellationToken ct = default);
     Task KickMemberAsync(Guid requesterId, Guid groupId, Guid targetUserId, CancellationToken ct = default);
     Task UpdateMemberRoleAsync(Guid requesterId, Guid groupId, Guid targetUserId, GroupRole newRole, CancellationToken ct = default);
+    Task TransferOwnershipAsync(Guid requesterId, Guid groupId, Guid newOwnerId, CancellationToken ct = default);
     Task<PagedResult<GroupMemberDto>> GetMembersAsync(Guid requesterId, Guid groupId, int page, int size, CancellationToken ct = default);
 
     // ── Join Request ───────────────────────────────────────────────────
