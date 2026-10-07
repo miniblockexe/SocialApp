@@ -163,6 +163,16 @@ public sealed class GroupsController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(ApiResponse<object>.BadRequest(ex.Message)); }
     }
 
+    [HttpPost("{id:guid}/transfer-ownership")]
+    public async Task<IActionResult> TransferOwnership(Guid id, [FromBody] TransferOwnershipDto dto, CancellationToken ct)
+    {
+        var userId = User.GetUserIdOrThrow();
+        try { await _groupService.TransferOwnershipAsync(userId, id, dto.NewOwnerId, ct); return NoContent(); }
+        catch (KeyNotFoundException ex) { return NotFound(ApiResponse<object>.NotFound(ex.Message)); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, ApiResponse<object>.Forbidden(ex.Message)); }
+        catch (InvalidOperationException ex) { return BadRequest(ApiResponse<object>.BadRequest(ex.Message)); }
+    }
+
     // ── Join Requests ──────────────────────────────────────────────────
 
     [HttpGet("{id:guid}/join-requests")]

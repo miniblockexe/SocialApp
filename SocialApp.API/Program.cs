@@ -37,7 +37,7 @@ builder.Services
 builder.Services.AddDatabase(config);
 builder.Services.AddJwtAuthentication(config);
 builder.Services.AddApplicationCors(config);
-builder.Services.AddApplicationRateLimiting(config);
+builder.Services.AddClientRateLimiting(config);
 builder.Services.AddApplicationSignalR(config);
 builder.Services.AddCloudStorage(config);
 builder.Services.AddGeminiAI(config);
@@ -86,14 +86,16 @@ app.UseSwaggerUI(options =>
 });
 // 4. CORS
 app.UseCors("AllowFrontend");
-// 5. Rate Limiter
-app.UseRateLimiter();
-// 6. Routing
+// 5. Routing
 app.UseRouting();
-// 7. Authentication & Authorization
+// 6. Authentication
 app.UseAuthentication();
+// 7. Rate Limiter — phải đặt SAU UseRouting (để đọc [EnableRateLimiting] của endpoint)
+//    và SAU UseAuthentication (để chia bộ đếm theo user)
+app.UseRateLimiter();
+// 8. Authorization
 app.UseAuthorization();
-// 8. Ban Check
+// 9. Ban Check
 app.UseBannedUserCheck();
 // ENDPOINTS
 // Health Check

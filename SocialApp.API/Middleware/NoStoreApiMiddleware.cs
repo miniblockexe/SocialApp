@@ -1,5 +1,10 @@
-﻿namespace SocialApp.API.Middleware;
+namespace SocialApp.API.Middleware;
 
+/// <summary>
+/// Thêm "Cache-Control: no-store" cho mọi response /api/* (trừ endpoint đã tự đặt Cache-Control,
+/// ví dụ ShareController có [ResponseCache]) để proxy/CDN phía trước (Cloudflare Worker)
+/// không cache dữ liệu theo từng user như profile, trạng thái kết bạn, trạng thái ban.
+/// </summary>
 public class NoStoreApiMiddleware
 {
     private readonly RequestDelegate _next;

@@ -258,6 +258,33 @@ public sealed class GroupService : IGroupService
         await _groupRepo.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Chuyển quyền Owner cho một thành viên khác: Owner cũ trở thành Admin, thành viên được chọn trở thành Owner.
+    /// </summary>
+    public async Task TransferOwnershipAsync(Guid requesterId, Guid groupId, Guid newOwnerId, CancellationToken ct = default)
+    {
+        var group = await _groupRepo.GetByIdAsync(groupId, ct: ct)
+            ?? throw new KeyNotFoundException("Nhóm không tồn tại.");
+
+        if (group.OwnerId != requesterId)
+            throw new UnauthorizedAccessException("Chỉ owner mới có thể chuyển quyền owner.");
+
+        if (newOwnerId == requesterId)
+            throw new InvalidOperationException("Bạn đã là owner của nhóm này.");
+
+        var newOwnerMember = await _groupRepo.GetMemberAsync(groupId, newOwnerId, ct)
+            ?? throw new KeyNotFoundException("Thành viên không tồn tại trong nhóm.");
+
+        var currentOwnerMember = await _groupRepo.GetMemberAsync(groupId, requesterId, ct);
+
+        group.OwnerId = newOwnerId;
+        newOwnerMember.Role = GroupRole.Owner;
+        if (currentOwnerMember != null)
+            currentOwnerMember.Role = GroupRole.Admin;
+
+        await _groupRepo.SaveChangesAsync(ct);
+    }
+
     public async Task<PagedResult<GroupMemberDto>> GetMembersAsync(Guid requesterId, Guid groupId, int page, int size, CancellationToken ct = default)
     {
         var group = await _groupRepo.GetByIdAsync(groupId, ct: ct)
