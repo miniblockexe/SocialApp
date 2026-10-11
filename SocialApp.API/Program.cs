@@ -141,7 +141,7 @@ app.UseBannedUserCheck();
 app.MapHealthChecks("/health");
 // Controllers (API)
 app.MapControllers();
-// SignalR
+// SignalR//
 var signalRConfig = config.GetSection("SignalRSettings");
 app.MapHub<ChatHub>(
     signalRConfig["ChatHubPath"] ?? "/hubs/chat");
