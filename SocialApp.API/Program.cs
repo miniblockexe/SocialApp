@@ -43,7 +43,7 @@ builder.Services.AddCloudStorage(config);
 builder.Services.AddGeminiAI(config);
 builder.Services.AddApplicationOptions(config);
 builder.Services.AddApplicationServices();
-builder.Services.AddHttpClient(); 
+builder.Services.AddHttpClient();
 builder.Services.AddSwaggerWithJwt();
 // Health Checks
 builder.Services.AddHealthChecks()
@@ -83,6 +83,46 @@ app.UseSwaggerUI(options =>
     options.SwaggerEndpoint("/swagger/v1/swagger.json", "SocialApp API v1");
     options.RoutePrefix = "swagger";
     options.DisplayRequestDuration();
+
+    options.HeadContent = """
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+window.addEventListener('load', function () {
+  var inited = false;
+  function mount() {
+    if (!window.google) return;
+    var wrap = document.querySelector('.auth-wrapper');          
+    if (!wrap || document.getElementById('gbox')) return;
+    var box = document.createElement('div');
+    box.id = 'gbox';
+    box.style = 'display:inline-flex;align-items:center;gap:8px;margin-right:12px';
+    box.innerHTML = '<div id="gbtn"></div>' +
+      '<input id="gtok" readonly placeholder="idToken" style="width:220px;padding:6px;font-size:12px" />' +
+      '<small id="gmsg"></small>';
+    wrap.insertBefore(box, wrap.firstChild);                     
+    if (!inited) {
+      inited = true;
+      google.accounts.id.initialize({
+        client_id: '181990983325-06376ui32t35lb5e3q1e1imgku9sokat.apps.googleusercontent.com',
+        callback: function (r) {
+          var tok = r.credential;
+          document.getElementById('gtok').value = tok;
+          var msg = document.getElementById('gmsg');
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(tok).then(
+              function () { msg.textContent = 'Đã copy idToken, dán vào body google-login'; },
+              function () { msg.textContent = 'Bấm vào ô rồi Ctrl+C để copy'; });
+          } else { msg.textContent = 'Bấm vào ô rồi Ctrl+C để copy'; }
+        }
+      });
+    }
+    google.accounts.id.renderButton(document.getElementById('gbtn'), { theme: 'outline' });
+    document.getElementById('gtok').addEventListener('focus', function () { this.select(); });
+  }
+  setInterval(mount, 500);                                     
+});
+</script>
+""";
 });
 // 4. CORS
 app.UseCors("AllowFrontend");
@@ -90,8 +130,7 @@ app.UseCors("AllowFrontend");
 app.UseRouting();
 // 6. Authentication
 app.UseAuthentication();
-// 7. Rate Limiter — phải đặt SAU UseRouting (để đọc [EnableRateLimiting] của endpoint)
-//    và SAU UseAuthentication (để chia bộ đếm theo user)
+// 7. Rate Limiter
 app.UseRateLimiter();
 // 8. Authorization
 app.UseAuthorization();
