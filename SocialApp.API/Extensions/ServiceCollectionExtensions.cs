@@ -397,7 +397,7 @@ public static class ServiceCollectionExtensions
             {
                 Title = "SocialApp API",
                 Version = "v1",
-                Description = "Facebook clone — ASP.NET Core 8 Web API"
+                Description = "ASP.NET Core 8 Web API"
             });
 
             var jwtScheme = new OpenApiSecurityScheme
